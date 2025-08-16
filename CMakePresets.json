@@ -1,0 +1,106 @@
+﻿{
+    "version": 10,
+    "configurePresets": [
+        {
+            "name": "common-base",
+            "description": "Common base preset",
+            "hidden": true,
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${hostSystemName}/${presetName}",
+            "installDir": "${sourceDir}/build/${hostSystemName}/install/${presetName}",
+
+            "architecture": {
+                "value": "x64",
+                "strategy": "external"
+            }
+        },
+        {
+            "name": "windows-base",
+            "description": "Target Windows with the Visual Studio development environment.",
+            "hidden": true,
+            "inherits" : ["common-base"],
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "cl.exe",
+                "CMAKE_CXX_COMPILER": "cl.exe"
+            },
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
+            }
+        },
+
+        {
+            "name": "linux-base",
+            "description": "Target Linux",
+            "hidden": true,
+            "inherits" : ["common-base"],
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Linux"
+            }
+        },
+        {
+            "name": "win-debug",
+            "displayName": "Windows Debug",
+            "description": "Target Windows (64-bit) with the Visual Studio development environment. (Debug)",
+            "inherits": "windows-base",
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+        },
+        {
+            "name": "win-release",
+            "displayName": "Windows Release",
+            "description": "Target Windows (64-bit) with the Visual Studio development environment. (RelWithDebInfo)",
+            "inherits": "windows-base",
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+        },
+        {
+            "name": "linux-debug",
+            "displayName": "Linux Debug",
+            "description": "Target Linux (64-bit) (Debug)",
+            "inherits": "linux-base",
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+        },
+        {
+            "name": "linux-release",
+            "displayName": "Linux Release",
+            "description": "Target Linux (64-bit) (RelWithDebInfo)",
+            "inherits": "linux-base",
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "win-debug",
+            "displayName": "Windows Debug",
+            "description": "Target Windows (64-bit) with the Visual Studio development environment. (Debug)",
+            "configurePreset": "win-debug",
+            "jobs": 12
+        },
+        {
+            "name": "win-release",
+            "displayName": "Windows Release",
+            "description": "Target Windows (64-bit) with the Visual Studio development environment. (RelWithDebInfo)",
+
+            "configurePreset": "win-release",
+            "jobs": 12
+        },
+
+        {
+            "name": "linux-debug",
+            "displayName": "Linux Debug",
+            "description": "Target Linux (64-bit) (Debug)",
+            "configurePreset": "linux-debug",
+            "jobs": 12
+        },
+        {
+            "name": "linux-release",
+            "displayName": "Linux Release",
+            "description": "Target Linux (64-bit) (RelWithDebInfo)",
+
+            "configurePreset": "linux-release",
+            "jobs": 12
+        }
+    ]
+}
