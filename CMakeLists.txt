@@ -45,6 +45,13 @@ FetchContent_Declare(glfw
     SYSTEM
 )
 
+FetchContent_Declare(imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui 
+    GIT_TAG v1.92.2b-docking
+    GIT_SHALLOW TRUE
+    SYSTEM
+)
+
 set(SLANG_ENABLE_SLANGC OFF)
 set(SLANG_ENABLE_SLANGI OFF)
 set(SLANG_ENABLE_SLANGD OFF)
@@ -64,13 +71,45 @@ FetchContent_Declare(slang
     SYSTEM
 )
 
-FetchContent_MakeAvailable(glm Vulkan-Utility-Libraries VulkanMemoryAllocator glfw slang)
+FetchContent_MakeAvailable(glm Vulkan-Utility-Libraries VulkanMemoryAllocator glfw slang imgui)
+
+# --- Create a custom target for Dear ImGui ---
+# Glob the core ImGui source files
+file(GLOB IMGUI_CORE_SOURCES
+    "${imgui_SOURCE_DIR}/imgui.cpp"
+    "${imgui_SOURCE_DIR}/imgui_draw.cpp"
+    "${imgui_SOURCE_DIR}/imgui_tables.cpp"
+    "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
+    "${imgui_SOURCE_DIR}/imgui_demo.cpp"
+)
+
+# Add the specific backend files we need
+set(IMGUI_BACKEND_SOURCES
+    "${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp"
+    "${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp"
+)
+
+add_library(imgui_vulkan STATIC
+    ${IMGUI_CORE_SOURCES}
+    ${IMGUI_BACKEND_SOURCES}
+)
+target_include_directories(imgui_vulkan PUBLIC
+    ${imgui_SOURCE_DIR}
+)
+set_target_properties(imgui_vulkan PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+# The ImGui backends have their own dependencies (Vulkan and GLFW)
+# We make them PUBLIC so that any target linking against 'imgui' also links to them.
+target_link_libraries(imgui_vulkan PUBLIC
+    Vulkan::Vulkan
+    glfw
+)
 
 
 target_link_libraries(VulkanFramework 
     PUBLIC 
         glfw GPUOpen::VulkanMemoryAllocator slang
-        Vulkan::Vulkan Vulkan::UtilityHeaders glm::glm
+        Vulkan::Vulkan Vulkan::UtilityHeaders glm::glm imgui_vulkan
     )
 
 target_include_directories(VulkanFramework 

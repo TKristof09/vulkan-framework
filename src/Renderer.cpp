@@ -12,6 +12,10 @@
 
 #include <glm/glm.hpp>
 
+#include <imgui.h>
+#include <backends/imgui_impl_vulkan.h>
+#include <backends/imgui_impl_glfw.h>
+
 
 VkBool32 debugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageTypes, VkDebugUtilsMessengerCallbackDataEXT const* pCallbackData, void* /*pUserData*/);
 VkSurfaceFormatKHR ChooseSwapchainFormat(VkPhysicalDevice device, VkSurfaceKHR surface);
@@ -51,11 +55,15 @@ Renderer::Renderer(const std::shared_ptr<Window>& window) : m_window(window)
 
     CreateCommandBuffers();
     CreateSyncObjects();
+
+    SetupImgui();
 }
 
 Renderer::~Renderer()
 {
     vkDeviceWaitIdle(VulkanContext::GetDevice());
+
+
     for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
     {
         vkDestroySemaphore(VulkanContext::GetDevice(), m_imageAvailable[i], nullptr);
@@ -338,14 +346,17 @@ void Renderer::RecreateSwapchain()
 
     CreateCommandBuffers();
 
-    // ImGui_ImplVulkan_Shutdown();
-    // ImGui_ImplGlfw_Shutdown();
-    // ImGui::DestroyContext();
+    SetupImgui();
 }
 
 void Renderer::CleanupSwapchain()
 {
     vkDeviceWaitIdle(VulkanContext::GetDevice());
+
+
+    ImGui_ImplVulkan_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
 
     m_mainCommandBuffers.clear();
     m_framebuffers.clear();
@@ -415,11 +426,48 @@ void Renderer::CreateDescriptorPool()
     createInfo.sType                      = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     createInfo.poolSizeCount              = static_cast<uint32_t>(poolSizes.size());
     createInfo.pPoolSizes                 = poolSizes.data();
-    createInfo.maxSets                    = 100;  // we only use 1 but imgui also allocates 1 for each of our DebugUIImage elements
-    createInfo.flags                      = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
+    createInfo.maxSets                    = 100;
+    createInfo.flags                      = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
     VK_CHECK(vkCreateDescriptorPool(VulkanContext::GetDevice(), &createInfo, nullptr, &VulkanContext::m_descriptorPool), "Failed to create descriptor pool");
 }
 
+void Renderer::SetupImgui()
+{
+    ImGui::CreateContext();
+    ImGuiIO& io     = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_DockingEnable;
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForVulkan(m_window->GetWindow(), true);
+
+
+    VkPipelineRenderingCreateInfo pipelineRendering{};
+    pipelineRendering.sType                   = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+    pipelineRendering.colorAttachmentCount    = 1;
+    VkFormat colorAttachment                  = VulkanContext::GetSwapchainImageFormat();
+    pipelineRendering.pColorAttachmentFormats = &colorAttachment;
+
+
+    ImGui_ImplVulkan_InitInfo imguiInitInfo   = {};
+    imguiInitInfo.Instance                    = VulkanContext::GetInstance();
+    imguiInitInfo.PhysicalDevice              = VulkanContext::GetPhysicalDevice();
+    imguiInitInfo.Device                      = VulkanContext::GetDevice();
+    imguiInitInfo.QueueFamily                 = VulkanContext::GetQueueIndex();
+    imguiInitInfo.Queue                       = VulkanContext::GetQueue();
+    imguiInitInfo.PipelineCache               = VK_NULL_HANDLE;
+    imguiInitInfo.DescriptorPool              = VulkanContext::GetDescriptorPool();
+    imguiInitInfo.Allocator                   = nullptr;
+    imguiInitInfo.MinImageCount               = MAX_FRAMES_IN_FLIGHT;
+    imguiInitInfo.ImageCount                  = m_swapchainImages.size();
+    imguiInitInfo.MSAASamples                 = VK_SAMPLE_COUNT_1_BIT;
+    imguiInitInfo.UseDynamicRendering         = true;
+    imguiInitInfo.PipelineRenderingCreateInfo = pipelineRendering;
+
+    // clang-format off
+    // : idk why clang-format puts the lambda body on a new line
+    imguiInitInfo.CheckVkResultFn = [](VkResult result) { VK_CHECK(result, "Error in imgui"); };
+    // clang-format on
+    ImGui_ImplVulkan_Init(&imguiInitInfo);
+}
 
 void Renderer::Render(float dt)
 {
@@ -449,9 +497,6 @@ void Renderer::Render(float dt)
 
 
     VK_CHECK(vkResetFences(device, 1, &m_inFlightFences[m_currentFrame]), "Failed to reset in flight fences");
-
-
-    // TODO imgui m_debugUI->SetupFrame(imageIndex, 0, &m_renderPass);	//subpass is 0 because we only have one subpass for now
 
 
     CommandBuffer& cb = m_mainCommandBuffers[imageIndex];
@@ -549,9 +594,9 @@ void Renderer::Render(float dt)
         vkCmdPipelineBarrier2(cb.GetCommandBuffer(), &dependencyInfo);
     }
 
-    // ImGui_ImplVulkan_NewFrame();
-    // ImGui_ImplGlfw_NewFrame();
-    // ImGui::NewFrame();
+    ImGui_ImplVulkan_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
 
     for(auto& command : m_renderCommands)
         command(cb, *m_framebuffers[imageIndex], m_currentFrame, dt);
@@ -605,11 +650,8 @@ void Renderer::Render(float dt)
     vkCmdBeginRendering(cb.GetCommandBuffer(), &uiRenderingInfo);
 
 
-    // static bool show = true;
-    // ImGui::ShowDemoWindow(&show);
-    //
-    // ImGui::Render();
-    // ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cb.GetCommandBuffer());
+    ImGui::Render();
+    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cb.GetCommandBuffer());
 
     vkCmdEndRendering(cb.GetCommandBuffer());
 

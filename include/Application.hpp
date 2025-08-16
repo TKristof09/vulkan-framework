@@ -25,7 +25,7 @@ public:
 private:
     std::shared_ptr<Window> m_window;
     std::unique_ptr<Renderer> m_renderer;
-    double m_frameTime;
+    double m_targetFrameTime;
 
     static Application* s_instance;
 };

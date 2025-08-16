@@ -32,6 +32,8 @@ private:
     void CreateSyncObjects();
     void CreateDescriptorPool();
 
+    void SetupImgui();
+
     std::shared_ptr<Window> m_window;
     VkSurfaceKHR m_surface;
     VkSwapchainKHR m_swapchain;

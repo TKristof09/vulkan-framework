@@ -6,10 +6,11 @@
 #include "VulkanContext.hpp"
 #include "Window.hpp"
 #include "Renderer.hpp"
+#include <thread>
 
 Application* Application::s_instance = nullptr;
 
-Application::Application(uint32_t width, uint32_t height, uint32_t frameRate, const std::string& title) : m_frameTime(1.0 / frameRate)
+Application::Application(uint32_t width, uint32_t height, uint32_t frameRate, const std::string& title) : m_targetFrameTime(frameRate == 0 ? 0 : 1.0 / frameRate)
 {
     s_instance = this;
 
@@ -42,15 +43,24 @@ void Application::Run()
         double deltaTime = startTime - lastTime;
         lastTime         = startTime;
 
+        Time::SetDelta(deltaTime);
 
         glfwPollEvents();  // TODO this blocks while you hold the title bar(or the resize cursor), only fix seems to be to render on another thread
 
         if(glfwGetKey(w, GLFW_KEY_ESCAPE) == GLFW_PRESS)
             break;
 
-        Time::SetDelta(deltaTime);
 
         m_renderer->Render(deltaTime);
+
+        double endTime   = Time::GetTime();
+        double frameTime = endTime - startTime;
+
+        if(frameTime < m_targetFrameTime)
+        {
+            double sleepTime = m_targetFrameTime - frameTime;
+            std::this_thread::sleep_for(std::chrono::duration<double>(sleepTime));
+        }
     }
 
     vkDeviceWaitIdle(VulkanContext::GetDevice());
