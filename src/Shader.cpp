@@ -70,14 +70,11 @@ void Shader::Compile(const std::filesystem::path& path)
     sessionDesc.searchPaths               = searchPath.data();
     sessionDesc.searchPathCount           = searchPath.size();
 
-    std::array<slang::CompilerOptionEntry, 3> options = {
+    std::array<slang::CompilerOptionEntry, 2> options = {
         {{slang::CompilerOptionName::EmitSpirvDirectly,
           {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}},
-         {slang::CompilerOptionName::Optimization,
-          {slang::CompilerOptionValueKind::Int, 0, 0, nullptr, nullptr}},
-
-         {slang::CompilerOptionName::PreserveParameters,
-          {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}}}
+         {slang::CompilerOptionName::DebugInformation,
+          {slang::CompilerOptionValueKind::Int, SlangDebugInfoLevel::SLANG_DEBUG_INFO_LEVEL_MAXIMAL, 0, nullptr, nullptr}}}
     };
     sessionDesc.compilerOptionEntries    = options.data();
     sessionDesc.compilerOptionEntryCount = options.size();
@@ -86,10 +83,11 @@ void Shader::Compile(const std::filesystem::path& path)
     globalSession->createSession(sessionDesc, session.writeRef());
 
     // 3. Load module
+    std::string path_str = path.filename().string();
     Slang::ComPtr<slang::IModule> slangModule;
     {
         Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-        slangModule = session->loadModule(path.filename().c_str(), diagnosticsBlob.writeRef());
+        slangModule = session->loadModule(path_str.c_str(), diagnosticsBlob.writeRef());
         if(diagnosticsBlob != nullptr)
         {
             Log::Error("{}", (const char*)diagnosticsBlob->getBufferPointer());

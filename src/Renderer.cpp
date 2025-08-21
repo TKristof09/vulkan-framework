@@ -15,6 +15,7 @@
 #include <imgui.h>
 #include <backends/imgui_impl_vulkan.h>
 #include <backends/imgui_impl_glfw.h>
+#include <array>
 
 
 VkBool32 debugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageTypes, VkDebugUtilsMessengerCallbackDataEXT const* pCallbackData, void* /*pUserData*/);
@@ -57,12 +58,34 @@ Renderer::Renderer(const std::shared_ptr<Window>& window) : m_window(window)
     CreateSyncObjects();
 
     SetupImgui();
+    VkSamplerCreateInfo samplerCI{};
+    samplerCI.sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerCI.pNext                   = nullptr;
+    samplerCI.flags                   = 0;
+    samplerCI.magFilter               = VK_FILTER_LINEAR;
+    samplerCI.minFilter               = VK_FILTER_LINEAR;
+    samplerCI.mipmapMode              = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    samplerCI.addressModeU            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerCI.addressModeV            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerCI.addressModeW            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerCI.mipLodBias              = 0.0f;
+    samplerCI.anisotropyEnable        = VK_TRUE;
+    samplerCI.maxAnisotropy           = 16.f;
+    samplerCI.compareEnable           = VK_FALSE;
+    samplerCI.compareOp               = VK_COMPARE_OP_ALWAYS;
+    samplerCI.minLod                  = 0.0f;
+    samplerCI.maxLod                  = VK_LOD_CLAMP_NONE;
+    samplerCI.borderColor             = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+    samplerCI.unnormalizedCoordinates = VK_FALSE;
+
+    VK_CHECK(vkCreateSampler(VulkanContext::GetDevice(), &samplerCI, nullptr, &VulkanContext::m_textureSampler), "Failed to create sampler");
 }
 
 Renderer::~Renderer()
 {
     vkDeviceWaitIdle(VulkanContext::GetDevice());
 
+    vkDestroySampler(VulkanContext::GetDevice(), VulkanContext::GetTextureSampler(), nullptr);
 
     for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
     {

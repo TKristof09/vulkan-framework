@@ -79,30 +79,42 @@ void Buffer::Copy(Buffer* dst, VkDeviceSize size)
     commandBuffer.SubmitIdle();  // TODO better to submit with a fence instead of waiting until idle
 }
 
-void Buffer::CopyToImage(VkImage image, uint32_t width, uint32_t height)
+void Buffer::CopyToImage(Image& image, uint32_t width, uint32_t height, uint32_t bytesPerPixel, uint32_t layers)
 {
+    VkDeviceSize layerSize = static_cast<VkDeviceSize>(width) * height * bytesPerPixel;
+
     CommandBuffer commandBuffer;
     commandBuffer.Begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
-    VkBufferImageCopy region = {};
-    region.bufferOffset      = 0;
-    region.bufferRowLength   = 0;
-    region.bufferImageHeight = 0;
+    std::vector<VkBufferImageCopy> regions;
+    regions.resize(layers);
 
-    region.imageSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
-    region.imageSubresource.mipLevel       = 0;
-    region.imageSubresource.baseArrayLayer = 0;
-    region.imageSubresource.layerCount     = 1;
+    for(uint32_t i = 0; i < layers; ++i)
+    {
+        VkBufferImageCopy& region = regions[i];
+        region.bufferOffset       = layerSize * i;
+        region.bufferRowLength    = 0;
+        region.bufferImageHeight  = 0;
 
-    region.imageOffset = {0, 0, 0};
-    region.imageExtent = {width, height, 1};
+        region.imageSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.mipLevel       = 0;
+        region.imageSubresource.baseArrayLayer = i;
+        region.imageSubresource.layerCount     = 1;
 
-    vkCmdCopyBufferToImage(commandBuffer.GetCommandBuffer(), m_buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        region.imageOffset = {0, 0, 0};
+        region.imageExtent = {width, height, 1};
+    }
 
+    vkCmdCopyBufferToImage(
+        commandBuffer.GetCommandBuffer(),
+        m_buffer,
+        image.GetImage(),
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        static_cast<uint32_t>(regions.size()),
+        regions.data());
 
     commandBuffer.SubmitIdle();
 }
-
 void Buffer::Fill(const void* data, uint64_t size, uint64_t offset)
 {
     if(m_mappedMemory)

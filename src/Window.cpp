@@ -8,7 +8,10 @@ static void frambufferResizeCallback(GLFWwindow* window, int width, int height)
 
 Window::Window(uint32_t width, uint32_t height, const std::string& title) : m_width(width), m_height(height), m_title(title)
 {
+#ifdef linux
+    // renderdoc cant debug wayland applications so force x11 (via xwayland)
     glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+#endif
     if(!glfwInit())
     {
         const char* err;

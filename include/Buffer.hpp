@@ -1,4 +1,5 @@
 #pragma once
+#include "Image.hpp"
 #include "VulkanContext.hpp"
 #include "CommandBuffer.hpp"
 #include <vk_mem_alloc.h>
@@ -53,7 +54,7 @@ public:
     void Allocate(VkDeviceSize size, VkBufferUsageFlags usage, bool mappable = false);
     void Free();
     void Copy(Buffer* dst, VkDeviceSize size);
-    void CopyToImage(VkImage image, uint32_t width, uint32_t height);
+    void CopyToImage(Image& image, uint32_t width, uint32_t height, uint32_t bytesPerPixel = 4, uint32_t layers = 1);
     void Fill(const void* data, uint64_t size, uint64_t offset = 0);
 
     // offsets must be sorted in ascending order

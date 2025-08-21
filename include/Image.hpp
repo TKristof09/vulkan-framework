@@ -1,5 +1,6 @@
 #pragma once
 #include "VulkanContext.hpp"
+#include <filesystem>
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include <vector>
@@ -32,6 +33,8 @@ public:
     Image(uint32_t width, uint32_t height, ImageCreateInfo createInfo);
     Image(VkExtent2D extent, ImageCreateInfo createInfo);
     Image(std::pair<uint32_t, uint32_t> widthHeight, ImageCreateInfo createInfo);
+    static Image FromFile(std::filesystem::path path);
+    static Image CubemapFromFile(std::filesystem::path dirPath);
 
     Image(const Image& other) = delete;
 

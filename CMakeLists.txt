@@ -52,6 +52,12 @@ FetchContent_Declare(imgui
     SYSTEM
 )
 
+FetchContent_Declare(stb
+    GIT_REPOSITORY  https://github.com/nothings/stb/
+    GIT_SHALLOW TRUE
+    SYSTEM
+)
+
 set(SLANG_ENABLE_SLANGC OFF)
 set(SLANG_ENABLE_SLANGI OFF)
 set(SLANG_ENABLE_SLANGD OFF)
@@ -71,7 +77,7 @@ FetchContent_Declare(slang
     SYSTEM
 )
 
-FetchContent_MakeAvailable(glm Vulkan-Utility-Libraries VulkanMemoryAllocator glfw slang imgui)
+FetchContent_MakeAvailable(glm Vulkan-Utility-Libraries VulkanMemoryAllocator glfw slang imgui stb)
 
 # --- Create a custom target for Dear ImGui ---
 # Glob the core ImGui source files
@@ -105,11 +111,16 @@ target_link_libraries(imgui_vulkan PUBLIC
     glfw
 )
 
+add_library(stb_image INTERFACE)
+
+target_include_directories(stb_image INTERFACE ${stb_SOURCE_DIR})
+target_compile_definitions(stb_image INTERFACE STB_IMAGE_IMPLEMENTATION)
+
 
 target_link_libraries(VulkanFramework 
     PUBLIC 
         glfw GPUOpen::VulkanMemoryAllocator slang
-        Vulkan::Vulkan Vulkan::UtilityHeaders glm::glm imgui_vulkan
+        Vulkan::Vulkan Vulkan::UtilityHeaders glm::glm imgui_vulkan stb_image
     )
 
 target_include_directories(VulkanFramework 
@@ -144,7 +155,7 @@ set(MSVC_WARNINGS
 target_compile_options(VulkanFramework PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:${GCC_CLANG_WARNINGS}>
 
-    $<$<CXX_COMPILER_ID:MSVC>:${MSVC_WARNINGS}>
+    # $<$<CXX_COMPILER_ID:MSVC>:${MSVC_WARNINGS}>
 )
 
 target_compile_definitions(VulkanFramework PRIVATE

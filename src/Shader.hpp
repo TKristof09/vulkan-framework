@@ -5,6 +5,7 @@
 #include "VulkanContext.hpp"
 #include "slang.h"
 #include <filesystem>
+#include <array>
 #include "Log.hpp"
 
 class Pipeline;

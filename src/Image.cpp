@@ -1,8 +1,13 @@
 #include "Image.hpp"
+#include "Buffer.hpp"
 #include "CommandBuffer.hpp"
 #include <algorithm>
 #include <cmath>
+#include <unordered_map>
+#include <array>
 #include "Log.hpp"
+#include <stb_image.h>
+#include <vulkan/utility/vk_format_utils.h>
 
 bool hasStencilComponent(VkFormat format)
 {
@@ -57,9 +62,11 @@ Image::Image(uint32_t width, uint32_t height, ImageCreateInfo createInfo) : m_wi
         vmaCreateImage(VulkanContext::GetVmaAllocator(), &ci, &allocInfo, &m_image, &m_allocation, nullptr);
     }
 
-    VkImageViewCreateInfo viewCreateInfo = {};
-    viewCreateInfo.sType                 = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewCreateInfo.image                 = m_image;
+
+    VkImageViewCreateInfo viewCreateInfo
+        = {};
+    viewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewCreateInfo.image = m_image;
     if(createInfo.isCubeMap)
         viewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
     else
@@ -101,6 +108,134 @@ Image::Image(VkExtent2D extent, ImageCreateInfo createInfo) : Image(extent.width
 
 Image::Image(std::pair<uint32_t, uint32_t> widthHeight, ImageCreateInfo createInfo) : Image(widthHeight.first, widthHeight.second, createInfo)
 {
+}
+
+Image Image::FromFile(std::filesystem::path path)
+{
+    int width, height, channels;
+
+    stbi_uc* pixels = stbi_load(std::filesystem::absolute(path).string().c_str(), &width, &height, &channels, STBI_rgb_alpha);
+
+    if(channels != 4)
+        Log::Warn("Texture {} has {} channels, but is loaded with 4 channels", path.filename().string(), channels);
+    if(!pixels)
+        throw std::runtime_error("Failed to load texture image!");
+
+
+    ImageCreateInfo imageCI = {};
+    imageCI.format          = VK_FORMAT_R8G8B8A8_SRGB;
+    imageCI.usage           = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    imageCI.aspectFlags     = VK_IMAGE_ASPECT_COLOR_BIT;
+    imageCI.debugName       = path.filename().string();
+
+
+    Image texture(width, height, imageCI);
+
+    VkDeviceSize imageSize = width * height * 4;  // 8 bit per channel, 4 channels
+    Buffer stagingBuffer(imageSize,
+                         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                         true);
+
+    stagingBuffer.Fill(pixels, imageSize);
+    stbi_image_free(pixels);
+
+    texture.TransitionLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    stagingBuffer.CopyToImage(texture, width, height);
+    texture.GenerateMipmaps(VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL);
+
+    return texture;
+}
+
+
+Image Image::CubemapFromFile(std::filesystem::path dirPath)
+{
+    const std::array<std::string, 6> faceNames = {
+        // "top", "bottom", "front", "back", "left", "right"};
+        "right", "left", "top", "bottom", "front", "back"};
+
+    if(!std::filesystem::exists(dirPath) || !std::filesystem::is_directory(dirPath))
+        throw std::runtime_error("CubemapFromFile: path is not a directory: " + dirPath.string());
+
+    std::unordered_map<std::string, std::filesystem::path> found;
+    for(const auto& e : std::filesystem::directory_iterator(dirPath))
+    {
+        if(!e.is_regular_file())
+            continue;
+        auto stem = e.path().stem().string();
+        std::transform(stem.begin(), stem.end(), stem.begin(), ::tolower);
+        found.emplace(stem, e.path());
+    }
+
+    // ensure all required faces exist
+    for(auto& name : faceNames)
+    {
+        if(found.find(name) == found.end())
+            throw std::runtime_error("CubemapFromFile: missing face file: " + name);
+    }
+
+    int width = 0, height = 0, channels = 0;
+    std::vector<unsigned char> combined;
+
+    for(const auto& name : faceNames)
+    {
+        auto p = found.at(name);
+
+        int w, h, c;
+        stbi_uc* pixels = stbi_load(std::filesystem::absolute(p).string().c_str(), &w, &h, &c, STBI_rgb_alpha);
+        if(!pixels)
+        {
+            throw std::runtime_error("CubemapFromFile: failed to load image: " + p.string());
+        }
+
+        if(channels == 0)
+            channels = c;
+
+        if(width == 0 && height == 0)
+        {
+            width  = w;
+            height = h;
+            combined.reserve(static_cast<size_t>(width) * height * 4 * 6);
+        }
+        else if(width != w || height != h)
+        {
+            stbi_image_free(pixels);
+            throw std::runtime_error("CubemapFromFile: face sizes differ: " + p.string());
+        }
+
+        if(c != 4)
+            Log::Warn("Texture {} has {} channels, but is loaded with 4 channels", p.filename().string(), c);
+
+        size_t faceBytes = static_cast<size_t>(width) * height * 4;
+        combined.insert(combined.end(), pixels, pixels + faceBytes);
+
+        stbi_image_free(pixels);
+    }
+
+    if(width == 0 || height == 0)
+        throw std::runtime_error("CubemapFromFile: no images loaded.");
+
+    ImageCreateInfo imageCI = {};
+    imageCI.format          = VK_FORMAT_R8G8B8A8_SRGB;
+    imageCI.usage           = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    imageCI.aspectFlags     = VK_IMAGE_ASPECT_COLOR_BIT;
+    imageCI.debugName       = dirPath.filename().string();
+    imageCI.isCubeMap       = true;
+
+    Image cubemap(width, height, imageCI);
+
+    VkDeviceSize imageSizeEach = static_cast<VkDeviceSize>(width) * height * 4;
+    VkDeviceSize totalSize     = imageSizeEach * 6;
+
+    Buffer stagingBuffer(totalSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true);
+    stagingBuffer.Fill(combined.data(), totalSize);
+
+    cubemap.TransitionLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+    stagingBuffer.CopyToImage(cubemap, width, height, 4, 6);
+
+    cubemap.GenerateMipmaps(VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL);
+
+    return cubemap;
 }
 
 Image::~Image()
