@@ -33,7 +33,7 @@ public:
     Image(uint32_t width, uint32_t height, ImageCreateInfo createInfo);
     Image(VkExtent2D extent, ImageCreateInfo createInfo);
     Image(std::pair<uint32_t, uint32_t> widthHeight, ImageCreateInfo createInfo);
-    static Image FromFile(std::filesystem::path path);
+    static Image FromFile(std::filesystem::path path, bool srgb = true);
     static Image CubemapFromFile(std::filesystem::path dirPath);
 
     Image(const Image& other) = delete;

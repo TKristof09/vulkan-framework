@@ -41,7 +41,7 @@ Image::Image(uint32_t width, uint32_t height, ImageCreateInfo createInfo) : m_wi
 
         VkImageCreateInfo ci = {};
         ci.sType             = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-        ci.imageType         = VK_IMAGE_TYPE_2D;
+        ci.imageType         = height > 1 ? VK_IMAGE_TYPE_2D : VK_IMAGE_TYPE_1D;
         ci.extent.width      = width;
         ci.extent.height     = height;
         ci.extent.depth      = 1;
@@ -70,7 +70,12 @@ Image::Image(uint32_t width, uint32_t height, ImageCreateInfo createInfo) : m_wi
     if(createInfo.isCubeMap)
         viewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
     else
-        viewCreateInfo.viewType = createInfo.layerCount > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
+    {
+        if(height > 1)
+            viewCreateInfo.viewType = createInfo.layerCount > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
+        else
+            viewCreateInfo.viewType = createInfo.layerCount > 1 ? VK_IMAGE_VIEW_TYPE_1D_ARRAY : VK_IMAGE_VIEW_TYPE_1D;
+    }
     viewCreateInfo.format       = m_format;
     // stick to default color mapping(probably could leave this as default)
     viewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
@@ -110,7 +115,7 @@ Image::Image(std::pair<uint32_t, uint32_t> widthHeight, ImageCreateInfo createIn
 {
 }
 
-Image Image::FromFile(std::filesystem::path path)
+Image Image::FromFile(std::filesystem::path path, bool srgb)
 {
     int width, height, channels;
 
@@ -123,7 +128,7 @@ Image Image::FromFile(std::filesystem::path path)
 
 
     ImageCreateInfo imageCI = {};
-    imageCI.format          = VK_FORMAT_R8G8B8A8_SRGB;
+    imageCI.format          = srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
     imageCI.usage           = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     imageCI.aspectFlags     = VK_IMAGE_ASPECT_COLOR_BIT;
     imageCI.debugName       = path.filename().string();
