@@ -140,6 +140,25 @@ private:
     uint64_t m_uniformBufferSize = 0;
 };
 
+// Bools in shaders are actually ints, so we have to make sure the extra 3 bytes don't contain garbage
+template<>
+inline void Shader::SetParameter<bool>(uint32_t frameIndex, std::string_view name, const bool& data)
+{
+    int32_t dataInt = static_cast<int32_t>(data);
+    SetParameter(frameIndex, name, dataInt);
+}
+template<>
+inline void Shader::SetParameter<bool>(uint32_t frameIndex, std::string_view name, const std::vector<bool>& data)
+{
+    std::vector<int32_t> dataInts;
+    dataInts.reserve(data.size());
+    for(const bool& value : data)
+    {
+        dataInts.push_back(static_cast<int32_t>(value));
+    }
+    SetParameter(frameIndex, name, dataInts);
+}
+
 template<typename T>
 void Shader::SetParameter(uint32_t frameIndex, std::string_view name, const T& data)
 {

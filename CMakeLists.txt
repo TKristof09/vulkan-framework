@@ -155,7 +155,7 @@ set(MSVC_WARNINGS
 target_compile_options(VulkanFramework PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:${GCC_CLANG_WARNINGS}>
 
-    # $<$<CXX_COMPILER_ID:MSVC>:${MSVC_WARNINGS}>
+    $<$<CXX_COMPILER_ID:MSVC>:${MSVC_WARNINGS}>
 )
 
 target_compile_definitions(VulkanFramework PRIVATE

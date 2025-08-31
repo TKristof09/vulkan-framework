@@ -195,7 +195,6 @@ void Shader::ParsePushConsts(uint32_t rangeIndex, slang::VariableLayoutReflectio
                 }
                 else
                 {
-                    Log::Warn("{} offset {}", name, offs);
                     m_bindings[name] = {
                         .set            = rangeIndex,
                         .binding        = 0,
@@ -232,7 +231,6 @@ void Shader::ParseStruct(Offset binding, slang::VariableLayoutReflection* var, s
                 }
                 else
                 {
-                    Log::Warn("{} offset {}", name, offs);
                     m_bindings[name] = {
                         .set            = binding.bindingSet,
                         .binding        = binding.binding,
@@ -254,7 +252,6 @@ void Shader::GetLayout(slang::VariableLayoutReflection* vl, Offset offset, std::
     for(int r = 0; r < bindingRangeCount; ++r)
     {
         slang::BindingType bindingRangeType = tl->getBindingRangeType(r);
-        int count                           = tl->getBindingRangeBindingCount(r);
 
         switch(bindingRangeType)
         {
@@ -312,8 +309,6 @@ void Shader::GetLayout(slang::VariableLayoutReflection* vl, Offset offset, std::
             auto name    = leafVar ? (path + leafVar->getName()) : path.substr(0, path.length() - 1);
 
             m_bindings[name] = {.set = descriptorSetIndex, .binding = binding, .offset = 0, .type = vkDescriptorType};
-
-            Log::Info("{}: set {} binding {} type {} count {}", name, descriptorSetIndex, binding, string_VkDescriptorType(vkDescriptorType), count);
         }
     }
     auto subObjectRangeCount = tl->getSubObjectRangeCount();
@@ -321,7 +316,6 @@ void Shader::GetLayout(slang::VariableLayoutReflection* vl, Offset offset, std::
     {
         auto bindingRangeIndex = tl->getSubObjectRangeBindingRangeIndex(subObjectRangeIndex);
         auto bindingRangeType  = tl->getBindingRangeType(bindingRangeIndex);
-        int count              = tl->getBindingRangeBindingCount(bindingRangeIndex);
 
         auto subObjectTypeLayout = tl->getBindingRangeLeafTypeLayout(bindingRangeIndex);
 
@@ -338,7 +332,6 @@ void Shader::GetLayout(slang::VariableLayoutReflection* vl, Offset offset, std::
         //
         case slang::BindingType::ParameterBlock:
             {
-                Log::Warn("ParameterBlock {} for set {}", varPath, subObjectOffset.subelement);
                 if(subObjectTypeLayout->getElementTypeLayout()->getSize() > 0)
                 {
                     m_descriptorLayoutBuilders[subObjectOffset.subelement].AddBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
@@ -387,7 +380,6 @@ void Shader::GetLayout(slang::VariableLayoutReflection* vl, Offset offset, std::
                     m_uniformBufferInfos.push_back({descriptorSetIndex, containerOffset.binding, size, m_uniformBufferSize});
 
                     m_uniformBufferSize += size;
-                    Log::Info("{}: set {} binding {} type {} count {}", varPath, descriptorSetIndex, containerOffset.binding, string_VkDescriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER), count);
                 }
                 GetLayout(elementVarLayout, elementOffset, varPath);
             }
