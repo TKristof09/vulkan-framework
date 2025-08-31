@@ -239,11 +239,11 @@ void Renderer::CreateDevice()
     VkPhysicalDeviceFeatures deviceFeatures             = {};
     deviceFeatures.samplerAnisotropy                    = VK_TRUE;
     deviceFeatures.sampleRateShading                    = VK_TRUE;
-    deviceFeatures.shaderInt64                          = VK_TRUE;
-    deviceFeatures.multiDrawIndirect                    = VK_TRUE;
     deviceFeatures.shaderStorageImageReadWithoutFormat  = VK_TRUE;
     deviceFeatures.shaderStorageImageWriteWithoutFormat = VK_TRUE;
     deviceFeatures.pipelineStatisticsQuery              = VK_TRUE;
+    deviceFeatures.shaderInt64                          = VK_TRUE;
+    deviceFeatures.shaderFloat64                        = VK_TRUE;
 
     // deviceFeatures.depthBounds = VK_TRUE; //doesnt work on my surface 2017
 
