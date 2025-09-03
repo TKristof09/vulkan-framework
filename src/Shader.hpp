@@ -80,7 +80,7 @@ private:
         uint32_t pushConstantRange = -1;
         uint32_t subelement        = -1;
     };
-    void Compile(const std::filesystem::path& path);
+    bool Compile(const std::filesystem::path& path);
     void Reflect(slang::ProgramLayout* layout);
     void GetLayout(slang::VariableLayoutReflection* vl, Offset offset, std::string path, bool isParameterBlock = false);
     void ParsePushConsts(uint32_t rangeIndex, slang::VariableLayoutReflection* var, std::string path, uint32_t offset);

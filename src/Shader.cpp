@@ -17,7 +17,10 @@ Shader::Shader(const std::string& filename, VkShaderStageFlagBits stage)
 
     m_name = path.filename().string();
 
-    Compile(path);
+    if(!Compile(path))
+    {
+        abort();
+    }
 
     CreateDescriptors();
     if(m_uniformBufferSize > 0)
@@ -50,7 +53,7 @@ Shader::Shader(const std::string& filename, VkShaderStageFlagBits stage)
     }
 }
 
-void Shader::Compile(const std::filesystem::path& path)
+bool Shader::Compile(const std::filesystem::path& path)
 {
     // 1. Create Global Session
     Slang::ComPtr<slang::IGlobalSession> globalSession;
@@ -94,7 +97,7 @@ void Shader::Compile(const std::filesystem::path& path)
         }
         if(!slangModule)
         {
-            return;
+            return false;
         }
     }
 
@@ -106,7 +109,7 @@ void Shader::Compile(const std::filesystem::path& path)
         if(!entryPoint)
         {
             Log::Error("Error getting entry point");
-            return;
+            return false;
         }
     }
 
@@ -143,7 +146,10 @@ void Shader::Compile(const std::filesystem::path& path)
             Log::Error("{}", (const char*)diagnosticsBlob->getBufferPointer());
         }
         if(result < 0)
+        {
             Log::Error("Failed to link shader program");
+            return false;
+        }
     }
 
     // 7. Get Target Kernel Code
@@ -160,7 +166,10 @@ void Shader::Compile(const std::filesystem::path& path)
             Log::Error("{}", (const char*)diagnosticsBlob->getBufferPointer());
         }
         if(result < 0)
+        {
             Log::Error("Failed to compile shader program");
+            return false;
+        }
     }
     VkShaderModuleCreateInfo createInfo = {};
     createInfo.sType                    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -171,6 +180,7 @@ void Shader::Compile(const std::filesystem::path& path)
     VK_CHECK(vkCreateShaderModule(VulkanContext::GetDevice(), &createInfo, nullptr, &m_shaderModule), "Failed to create shader module");
 
     Reflect(composedProgram->getLayout());
+    return true;
 }
 
 
