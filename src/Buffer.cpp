@@ -73,7 +73,7 @@ void Buffer::Copy(Buffer* dst, VkDeviceSize size)
     VkBufferCopy copyRegion = {};
     copyRegion.srcOffset    = 0;
     copyRegion.dstOffset    = 0;
-    copyRegion.size         = size;
+    copyRegion.size         = size > 0 ? size : m_size;
     vkCmdCopyBuffer(commandBuffer.GetCommandBuffer(), m_buffer, dst->GetVkBuffer(), 1, &copyRegion);
 
     commandBuffer.SubmitIdle();  // TODO better to submit with a fence instead of waiting until idle
@@ -115,8 +115,11 @@ void Buffer::CopyToImage(Image& image, uint32_t width, uint32_t height, uint32_t
 
     commandBuffer.SubmitIdle();
 }
+
 void Buffer::Fill(const void* data, uint64_t size, uint64_t offset)
 {
+    assert(offset + size <= m_size);
+    // FIXME: make it work with device local buffers, this will need some staging buffer to do
     if(m_mappedMemory)
     {
         std::memcpy((void*)((uint8_t*)m_mappedMemory + offset), data, (size_t)size);
@@ -156,6 +159,7 @@ void Buffer::Fill(const std::vector<const void*>& datas, const std::vector<uint6
     uint32_t i = 0;
     for(auto offset : offsets)
     {
+        assert(offset + sizes[i] <= m_size);
         std::memcpy((void*)((uintptr_t)memory + offset), datas[i], (size_t)sizes[i]);
 
         i++;
@@ -226,4 +230,21 @@ void Buffer::Bind(const CommandBuffer& commandBuffer)
         Log::Error("Bufffer type not handled");
         break;
     }
+}
+
+
+VkBufferMemoryBarrier2 Buffer::GetBarrier(VkPipelineStageFlags2 srcStage, VkAccessFlagBits2 srcAccess, VkPipelineStageFlags2 dstStage, VkAccessFlagBits2 dstAccess)
+{
+    VkBufferMemoryBarrier2 barrier = {};
+    barrier.sType                  = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+    barrier.buffer                 = m_buffer;
+    barrier.offset                 = 0;
+    barrier.size                   = m_size;
+    barrier.srcQueueFamilyIndex    = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex    = VK_QUEUE_FAMILY_IGNORED;
+    barrier.srcAccessMask          = srcAccess;
+    barrier.dstAccessMask          = dstAccess;
+    barrier.srcStageMask           = srcStage;
+    barrier.dstStageMask           = dstStage;
+    return barrier;
 }

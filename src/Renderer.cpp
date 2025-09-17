@@ -153,14 +153,16 @@ void Renderer::CreateInstance()
     debugCreateInfo.messageType                        = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
     debugCreateInfo.pfnUserCallback                    = debugUtilsMessengerCallback;
 
-
+#ifdef VDEBUG
     createInfo.pNext = &debugCreateInfo;
+#endif
 
     VK_CHECK(vkCreateInstance(&createInfo, nullptr, &VulkanContext::m_instance), "Failed to create instance");
 
     VK_CHECK(glfwCreateWindowSurface(VulkanContext::m_instance, Application::GetInstance()->GetWindow()->GetWindow(), nullptr, &m_surface), "Failed to create window surface!");
 
 
+#ifdef VDEBUG
     VkDebugUtilsMessengerCreateInfoEXT dcreateInfo = {};
     dcreateInfo.sType                              = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
     dcreateInfo.messageSeverity                    = /*VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |*/ VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
@@ -168,6 +170,7 @@ void Renderer::CreateInstance()
     dcreateInfo.pfnUserCallback                    = debugUtilsMessengerCallback;
 
     VulkanContext::CreateDebugUtilsMessengerEXT(VulkanContext::GetInstance(), &dcreateInfo, nullptr, &VulkanContext::m_messenger);
+#endif
 
 
     uint32_t extCount = 0;
@@ -434,15 +437,17 @@ void Renderer::CreateSyncObjects()
 
 void Renderer::CreateDescriptorPool()
 {
-    std::array<VkDescriptorPoolSize, 4> poolSizes = {};
+    std::array<VkDescriptorPoolSize, 5> poolSizes = {};
     poolSizes[0].type                             = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     poolSizes[0].descriptorCount                  = NUM_DESCRIPTORS;
-    poolSizes[1].type                             = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    poolSizes[1].type                             = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
     poolSizes[1].descriptorCount                  = NUM_DESCRIPTORS;
-    poolSizes[2].type                             = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    poolSizes[2].type                             = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     poolSizes[2].descriptorCount                  = NUM_DESCRIPTORS;
-    poolSizes[3].type                             = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSizes[3].type                             = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     poolSizes[3].descriptorCount                  = NUM_DESCRIPTORS;
+    poolSizes[4].type                             = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSizes[4].descriptorCount                  = NUM_DESCRIPTORS;
 
 
     VkDescriptorPoolCreateInfo createInfo = {};
@@ -458,7 +463,7 @@ void Renderer::SetupImgui()
 {
     ImGui::CreateContext();
     ImGuiIO& io     = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_DockingEnable;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_DockingEnable /*| ImGuiConfigFlags_ViewportsEnable*/;
     ImGui::StyleColorsDark();
     ImGui_ImplGlfw_InitForVulkan(m_window->GetWindow(), true);
 
@@ -674,6 +679,8 @@ void Renderer::Render(float dt)
 
 
     ImGui::Render();
+    // ImGui::UpdatePlatformWindows();
+    // ImGui::RenderPlatformWindowsDefault(nullptr, (void*)cb.GetCommandBuffer());
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cb.GetCommandBuffer());
 
     vkCmdEndRendering(cb.GetCommandBuffer());

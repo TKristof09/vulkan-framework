@@ -4,16 +4,22 @@
 #include "Image.hpp"
 #include "VulkanContext.hpp"
 #include "slang.h"
+#include <cstring>
 #include <filesystem>
 #include <array>
 #include "Log.hpp"
 
 class Pipeline;
 
+template<typename T, typename... U>
+concept IsAnyOf = (std::same_as<T, U> || ...);
+template<typename T>
+concept IsSimpleParameter = !IsAnyOf<std::remove_cvref_t<std::remove_pointer_t<std::decay_t<T>>>, Buffer, Image>;
+
 class Shader
 {
 public:
-    Shader(const std::string& filename, VkShaderStageFlagBits stage);
+    Shader(const std::string& filename, VkShaderStageFlagBits stage, std::string_view entryPoint);
     ~Shader()
     {
         for(auto layout : m_descriptorLayouts)
@@ -44,13 +50,19 @@ public:
         return *this;
     }
 
-    void SetParameter(uint32_t frameIndex, std::string_view name, Image* image);
-    void SetParameter(uint32_t frameIndex, std::string_view name, Buffer* buffer);
+    void BindResources(CommandBuffer& cb, uint32_t frameIndex, VkPipelineLayout layout, VkPipelineBindPoint bindPoint) const;
+
+    void SetParameter(uint32_t frameIndex, std::string_view name, const Image* image);
+    void SetParameter(uint32_t frameIndex, std::string_view name, const Buffer* buffer);
 
     template<typename T>
+        requires(IsSimpleParameter<T>)
     void SetParameter(uint32_t frameIndex, std::string_view name, const T& data);
     template<typename T>
+        requires(IsSimpleParameter<T>)
     void SetParameter(uint32_t frameIndex, std::string_view name, const std::vector<T>& data);
+
+    void Dispatch(CommandBuffer& cb, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ);
 
 
 private:
@@ -80,7 +92,7 @@ private:
         uint32_t pushConstantRange = -1;
         uint32_t subelement        = -1;
     };
-    bool Compile(const std::filesystem::path& path);
+    bool Compile(const std::filesystem::path& path, std::string_view entryPoint);
     void Reflect(slang::ProgramLayout* layout);
     void GetLayout(slang::VariableLayoutReflection* vl, Offset offset, std::string path, bool isParameterBlock = false);
     void ParsePushConsts(uint32_t rangeIndex, slang::VariableLayoutReflection* var, std::string path, uint32_t offset);
@@ -130,14 +142,18 @@ private:
         std::size_t operator()(std::string_view str) const { return hash_type{}(str); }
         std::size_t operator()(std::string const& str) const { return hash_type{}(str); }
     };
-
     std::unordered_map<std::string, Binding, string_hash, std::equal_to<>> m_bindings;
 
-    std::vector<VkPushConstantRange> m_pushConstants;
+    std::vector<VkPushConstantRange> m_pushConstantRanges;
+    std::vector<uint8_t> m_pushConstantData;
 
     std::vector<Buffer> m_uniformBuffers;
     std::vector<std::tuple<uint32_t, uint32_t, uint64_t, uint64_t>> m_uniformBufferInfos;
     uint64_t m_uniformBufferSize = 0;
+
+    uint32_t m_numThreadsX;
+    uint32_t m_numThreadsY;
+    uint32_t m_numThreadsZ;
 };
 
 // Bools in shaders are actually ints, so we have to make sure the extra 3 bytes don't contain garbage
@@ -160,6 +176,7 @@ inline void Shader::SetParameter<bool>(uint32_t frameIndex, std::string_view nam
 }
 
 template<typename T>
+    requires(IsSimpleParameter<T>)
 void Shader::SetParameter(uint32_t frameIndex, std::string_view name, const T& data)
 {
     auto it = m_bindings.find(name);
@@ -173,8 +190,7 @@ void Shader::SetParameter(uint32_t frameIndex, std::string_view name, const T& d
 
     if(binding.isPushConstant)
     {
-        // TODO
-        abort();
+        std::memcpy(&m_pushConstantData[binding.offset], &data, binding.size);
     }
     else
     {
@@ -184,6 +200,7 @@ void Shader::SetParameter(uint32_t frameIndex, std::string_view name, const T& d
 
 
 template<typename T>
+    requires(IsSimpleParameter<T>)
 void Shader::SetParameter(uint32_t frameIndex, std::string_view name, const std::vector<T>& data)
 {
     auto it = m_bindings.find(name);
@@ -197,8 +214,17 @@ void Shader::SetParameter(uint32_t frameIndex, std::string_view name, const std:
 
     if(binding.isPushConstant)
     {
-        // TODO
-        abort();
+        if(binding.stride != sizeof(T))
+        {
+            for(size_t i = 0; i < data.size(); i++)
+            {
+                std::memcpy(&m_pushConstantData[binding.offset + i * binding.stride], &data[i], sizeof(T));
+            }
+        }
+        else
+        {
+            std::memcpy(&m_pushConstantData[binding.offset], data.data(), binding.size);
+        }
     }
     else
     {

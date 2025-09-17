@@ -466,3 +466,24 @@ void Image::GenerateMipmaps(VkImageLayout newLayout)
 
     m_layout = newLayout;
 }
+
+VkImageMemoryBarrier2 Image::GetBarrier(VkImageLayout oldLayout, VkImageLayout newLayout, VkPipelineStageFlags2 srcStage, VkAccessFlagBits2 srcAccess, VkPipelineStageFlags2 dstStage, VkAccessFlagBits2 dstAccess)
+{
+    VkImageMemoryBarrier2 barrier{};
+    barrier.sType                           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    barrier.oldLayout                       = oldLayout;
+    barrier.newLayout                       = newLayout;
+    barrier.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image                           = m_image;
+    barrier.subresourceRange.aspectMask     = m_aspect;
+    barrier.subresourceRange.baseMipLevel   = 0;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount     = 1;
+    barrier.subresourceRange.levelCount     = 1;
+    barrier.srcAccessMask                   = srcAccess;
+    barrier.dstAccessMask                   = dstAccess;
+    barrier.srcStageMask                    = srcStage;
+    barrier.dstStageMask                    = dstStage;
+    return barrier;
+}

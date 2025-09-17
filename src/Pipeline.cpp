@@ -290,7 +290,7 @@ void Pipeline::Bind(CommandBuffer& cb, uint32_t frameIndex) const
     }
     for(auto& shader : m_shaders)
     {
-        vkCmdBindDescriptorSets(cb.GetCommandBuffer(), bindPoint, m_layout, 0, shader.m_descriptorSets[frameIndex].size(), shader.m_descriptorSets[frameIndex].data(), 0, nullptr);
+        shader->BindResources(cb, frameIndex, m_layout, bindPoint);
     }
     vkCmdBindPipeline(cb.GetCommandBuffer(), bindPoint, m_pipeline);
 }

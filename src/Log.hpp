@@ -1,6 +1,8 @@
 #pragma once
 
 #include <print>
+#include <glm/glm.hpp>
+
 namespace Log
 {
 
@@ -60,4 +62,40 @@ void Error(std::format_string<Args...> fmt, Args&&... args)
 {
     Log(LogLevel::ERROR, fmt, std::forward<Args>(args)...);
 }
+}
+
+namespace std
+{
+
+// Helper to format a GLM vector of arbitrary dimension
+template<class CharT, class T, glm::length_t N, glm::qualifier Q>
+struct formatter<glm::vec<N, T, Q>, CharT>
+{
+    std::formatter<T, CharT> value_fmt;  // delegate to element formatter
+
+    constexpr auto parse(std::basic_format_parse_context<CharT>& ctx)
+    {
+        // Parse the spec into value_fmt
+        return value_fmt.parse(ctx);
+    }
+
+    template<class FormatContext>
+    auto format(const glm::vec<N, T, Q>& v, FormatContext& ctx) const
+    {
+        auto out = ctx.out();
+        *out++   = '(';
+        for(glm::length_t i = 0; i < N; ++i)
+        {
+            if(i > 0)
+            {
+                *out++ = ',';
+                *out++ = ' ';
+            }
+            out = value_fmt.format(v[i], ctx);  // apply element formatter
+        }
+        *out++ = ')';
+        return out;
+    }
+};
+
 }

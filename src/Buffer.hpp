@@ -53,8 +53,13 @@ public:
 
     void Allocate(VkDeviceSize size, VkBufferUsageFlags usage, bool mappable = false);
     void Free();
-    void Copy(Buffer* dst, VkDeviceSize size);
+    void Copy(Buffer* dst, VkDeviceSize size = 0);
     void CopyToImage(Image& image, uint32_t width, uint32_t height, uint32_t bytesPerPixel = 4, uint32_t layers = 1);
+    template<typename T>
+    void Fill(const std::vector<T>& data, uint64_t offset = 0)
+    {
+        Fill(data.data(), data.size() * sizeof(T), offset);
+    }
     void Fill(const void* data, uint64_t size, uint64_t offset = 0);
 
     // offsets must be sorted in ascending order
@@ -71,6 +76,9 @@ public:
 
         return vkGetBufferDeviceAddress(VulkanContext::GetDevice(), &info);
     }
+
+    VkBufferMemoryBarrier2 GetBarrier(VkPipelineStageFlags2 srcStage, VkAccessFlagBits2 srcAccess, VkPipelineStageFlags2 dstStage, VkAccessFlagBits2 dstAccess);
+
 
 protected:
     Type m_type;

@@ -111,10 +111,13 @@ target_link_libraries(imgui_vulkan PUBLIC
     glfw
 )
 
-add_library(stb_image INTERFACE)
-
-target_include_directories(stb_image INTERFACE ${stb_SOURCE_DIR})
-target_compile_definitions(stb_image INTERFACE STB_IMAGE_IMPLEMENTATION)
+# auto generate a cpp file that defines the stb_image implementation
+set(STB_WRAPPER "${stb_SOURCE_DIR}/stb_image_wrapper.cpp")
+if(NOT EXISTS "${STB_WRAPPER}")
+    file(WRITE "${STB_WRAPPER}" "#define STB_IMAGE_IMPLEMENTATION\n#include \"stb_image.h\"\n")
+endif()
+add_library(stb_image STATIC "${STB_WRAPPER}")
+target_include_directories(stb_image PUBLIC ${stb_SOURCE_DIR})
 
 
 target_link_libraries(VulkanFramework 
@@ -125,8 +128,7 @@ target_link_libraries(VulkanFramework
 
 target_include_directories(VulkanFramework 
     PUBLIC 
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/include)
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 # target_precompile_headers(VulkanFramework 
 #     PRIVATE 
