@@ -3,22 +3,31 @@
 #include "VulkanContext.hpp"
 
 #include <cmath>
+#include <set>
 #include <slang.h>
 #include <slang-com-helper.h>
 #include <slang-com-ptr.h>
 
-#include <fstream>
 #include <algorithm>
+#include <ranges>
+
+
+struct PairHash
+{
+    std::size_t operator()(const std::pair<uint32_t, uint32_t>& p) const noexcept
+    {
+        return (static_cast<std::size_t>(p.first) << 32) ^ static_cast<std::size_t>(p.second);
+    }
+};
 
 VkShaderStageFlags SlangStageToVulkan(SlangStage stage);
 VkDescriptorType SlangBindingTypeToVulkan(slang::BindingType bindingType);
 
 static Slang::ComPtr<slang::IGlobalSession> globalSession;
 
-Shader::Shader(const std::string& filename, VkShaderStageFlagBits stage, std::string_view entryPoint)
+Shader::Shader(const std::filesystem::path& path, VkShaderStageFlagBits stage, std::string_view entryPoint)
 {
-    std::filesystem::path path = filename;
-    m_stage                    = stage;
+    m_stage = stage;
 
     m_name = std::format("{}::{}", path.filename().string(), entryPoint);
 
@@ -32,7 +41,8 @@ Shader::Shader(const std::string& filename, VkShaderStageFlagBits stage, std::st
     {
         for(int i = 0; i < Renderer::MAX_FRAMES_IN_FLIGHT; i++)
         {
-            m_uniformBuffers.emplace_back(m_uniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
+            const auto& buf = m_uniformBuffers.emplace_back(m_uniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
+            VK_SET_DEBUG_NAME(buf.GetVkBuffer(), VK_OBJECT_TYPE_BUFFER, m_name.c_str());
         }
         for(int i = 0; i < Renderer::MAX_FRAMES_IN_FLIGHT; i++)
         {
@@ -56,22 +66,14 @@ Shader::Shader(const std::string& filename, VkShaderStageFlagBits stage, std::st
             }
         }
     }
-    std::sort(m_pushConstantRanges.begin(), m_pushConstantRanges.end(), [](auto lhs, auto rhs)
-              { return lhs.offset < rhs.offset; });
-    for(auto pcRange : m_pushConstantRanges)
-    {
-        assert(pcRange.offset == m_pushConstantData.size());
-        m_pushConstantData.resize(m_pushConstantData.size() + pcRange.size);
-    }
+    m_pushConstantData.resize(m_pushConstantRange.size + m_pushConstantRange.offset);
 }
 void Shader::BindResources(CommandBuffer& cb, uint32_t frameIndex, VkPipelineLayout layout, VkPipelineBindPoint bindPoint) const
 {
     vkCmdBindDescriptorSets(cb.GetCommandBuffer(), bindPoint, layout, 0, m_descriptorSets[frameIndex].size(), m_descriptorSets[frameIndex].data(), 0, nullptr);
 
-    for(auto pcRange : m_pushConstantRanges)
-    {
-        vkCmdPushConstants(cb.GetCommandBuffer(), layout, pcRange.stageFlags, pcRange.offset, pcRange.size, &m_pushConstantData[pcRange.offset]);
-    }
+    if(m_pushConstantRange.size > 0)
+        vkCmdPushConstants(cb.GetCommandBuffer(), layout, m_stage, m_pushConstantRange.offset, m_pushConstantRange.size, &m_pushConstantData[m_pushConstantRange.offset]);
 }
 
 void Shader::Dispatch(CommandBuffer& cb, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ)
@@ -86,6 +88,8 @@ void Shader::Dispatch(CommandBuffer& cb, uint32_t threadCountX, uint32_t threadC
 
 bool Shader::Compile(const std::filesystem::path& path, std::string_view entryPoint)
 {
+    std::filesystem::path cwd = std::filesystem::current_path();
+    Log::Info("CWD: {}", cwd.string());
     if(!globalSession.get())
         createGlobalSession(globalSession.writeRef());
 
@@ -95,8 +99,10 @@ bool Shader::Compile(const std::filesystem::path& path, std::string_view entryPo
     targetDesc.format              = SLANG_SPIRV;
     targetDesc.profile             = globalSession->findProfile("spirv_1_5");
 
-    sessionDesc.targets     = &targetDesc;
-    sessionDesc.targetCount = 1;
+    sessionDesc.targets                 = &targetDesc;
+    sessionDesc.targetCount             = 1;
+    sessionDesc.defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR;
+
 
     auto parentPathStr                    = path.parent_path().string();  // std::string
     std::array<const char*, 1> searchPath = {parentPathStr.c_str()};
@@ -212,319 +218,247 @@ bool Shader::Compile(const std::filesystem::path& path, std::string_view entryPo
     return true;
 }
 
-
-void Shader::ParsePushConsts(uint32_t rangeIndex, slang::VariableLayoutReflection* var, std::string path, uint32_t offset)
+struct BindingSlot
 {
-    if(var->getTypeLayout()->getKind() == slang::TypeReflection::Kind::Struct)
+    uint64_t set          = 0;
+    uint64_t binding      = 0;
+    uint64_t offset       = 0;
+    uint64_t pushConstant = 0;
+    bool isPushConstant   = false;
+};
+BindingSlot CalculateOffset(const std::deque<slang::VariableLayoutReflection*>& path, slang::ParameterCategory unit)
+{
+    BindingSlot slot{};
+    // special handling because of the possible implicit constant buffers
+
+    if(unit == slang::ParameterCategory::Uniform)
     {
-        int fieldCount = var->getTypeLayout()->getFieldCount();
-
-        for(int i = 0; i < fieldCount; i++)
+        bool foundCB = false;
+        for(const auto v : path)
         {
-            auto field = var->getTypeLayout()->getFieldByIndex(i);
+            slot.offset += v->getOffset(slang::ParameterCategory::Uniform);
 
-            if(field->getTypeLayout()->getSize(slang::ParameterCategory::Uniform) > 0)
+            if(foundCB)
             {
-                auto n    = field->getName();
-                auto name = path + n;
-                auto offs = field->getOffset() + offset;
-                if(field->getTypeLayout()->getKind() == slang::TypeReflection::Kind::Struct)
+                slot.set     += v->getOffset(slang::ParameterCategory::RegisterSpace) + v->getOffset(slang::ParameterCategory::SubElementRegisterSpace);
+                slot.binding += v->getOffset(slang::ParameterCategory::DescriptorTableSlot);
+
+                if(slot.isPushConstant)
+                    slot.pushConstant += v->getOffset(slang::ParameterCategory::PushConstantBuffer);
+            }
+            else if(v->getTypeLayout()->getKind() == slang::TypeReflection::Kind::ConstantBuffer)
+            {
+                slot.set     = v->getOffset(slang::ParameterCategory::RegisterSpace) + v->getOffset(slang::ParameterCategory::SubElementRegisterSpace);
+                slot.binding = v->getOffset(slang::ParameterCategory::DescriptorTableSlot);
+
+                foundCB = true;
+                if(v->getTypeLayout()->getSize(slang::ParameterCategory::PushConstantBuffer) > 0)
                 {
-                    ParsePushConsts(rangeIndex, field, name + ".", offs);
-                }
-                else
-                {
-                    m_bindings[name] = {
-                        .set            = rangeIndex,
-                        .binding        = 0,
-                        .offset         = offs,
-                        .size           = field->getTypeLayout()->getSize(slang::ParameterCategory::Uniform),
-                        .type           = VK_DESCRIPTOR_TYPE_MAX_ENUM,
-                        .isPushConstant = true};
+                    slot.pushConstant   = v->getOffset(slang::ParameterCategory::PushConstantBuffer);
+                    slot.isPushConstant = true;
                 }
             }
         }
     }
-};
-
-
-void Shader::ParseStruct(Offset binding, slang::VariableLayoutReflection* var, std::string path, uint32_t offset)
-{
-    if(var->getTypeLayout()->getKind() == slang::TypeReflection::Kind::Struct)
+    else
     {
-        int fieldCount = var->getTypeLayout()->getFieldCount();
-
-        for(int i = 0; i < fieldCount; i++)
+        for(const auto v : path)
         {
-            auto field = var->getTypeLayout()->getFieldByIndex(i);
+            slot.set     += v->getOffset(slang::ParameterCategory::RegisterSpace) + v->getOffset(slang::ParameterCategory::SubElementRegisterSpace);
+            slot.binding += v->getOffset(slang::ParameterCategory::DescriptorTableSlot);
 
-            if(field->getTypeLayout()->getSize(slang::ParameterCategory::Uniform) > 0)
-            {
-                auto n      = field->getName();
-                auto name   = path + n;
-                auto offs   = field->getOffset() + offset + m_uniformBufferSize;
-                auto stride = field->getTypeLayout()->getKind() == slang::TypeReflection::Kind::Array ? field->getTypeLayout()->getElementStride(SLANG_PARAMETER_CATEGORY_UNIFORM) : 0;
-                if(field->getTypeLayout()->getKind() == slang::TypeReflection::Kind::Struct)
-                {
-                    ParseStruct(binding, field, name + ".", offs);
-                }
-                else
-                {
-                    m_bindings[name] = {
-                        .set            = binding.bindingSet,
-                        .binding        = binding.binding,
-                        .offset         = offs,
-                        .size           = field->getTypeLayout()->getSize(slang::ParameterCategory::Uniform),
-                        .stride         = static_cast<uint32_t>(stride),
-                        .type           = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                        .isPushConstant = false};
-                }
-            }
+            // TODO this doesnt make sense? I think only uniforms can go in PC
+            slot.pushConstant += v->getOffset(slang::ParameterCategory::PushConstantBuffer);
         }
     }
-};
-void Shader::GetLayout(slang::VariableLayoutReflection* vl, Offset offset, std::string path, bool isParameterBlock)
+
+    return slot;
+}
+
+std::string GetName(const std::deque<slang::VariableLayoutReflection*>& pathStack)
 {
+    std::string res;
+    for(const auto v : std::ranges::reverse_view(pathStack))
+    {
+        auto n = v->getName();
+        if(n)
+            res += std::string(n) + ".";
+    }
+    return res.substr(0, res.length() - 1);
+}
+
+
+void Shader::GetLayout(slang::VariableLayoutReflection* vl, std::deque<slang::VariableLayoutReflection*>& pathStack, bool isEntryPoint)
+{
+    pathStack.push_front(vl);
+
     auto tl = vl->getTypeLayout();
 
-    int bindingRangeCount = tl->getBindingRangeCount();
+    const char* varName = vl->getName();
+    if(!varName)
+        varName = "<anon_var>";
 
-    // FIXME: some struct members don't get parsed correctly. When a struct
-    // contains a texture field the texture won't get parsed as
-    // structname.fieldname but only as fieldname because it gets parsed by
-    // this for loop as a leafnode instead of gettin parsed in the struct
-    // parser (which only handles uniforms not textures)
+    const char* typeName = tl->getName();
+    if(!typeName)
+        typeName = "<anon_type>";
 
-    for(int r = 0; r < bindingRangeCount; ++r)
+    auto category    = vl->getCategory();
+    BindingSlot slot = CalculateOffset(pathStack, category);
+
+
+    auto fieldCount = vl->getTypeLayout()->getFieldCount();
+    for(unsigned int i = 0; i < fieldCount; i++)
     {
-        slang::BindingType bindingRangeType = tl->getBindingRangeType(r);
+        auto field = tl->getFieldByIndex(i);
+        GetLayout(field, pathStack, isEntryPoint);
+    }
 
-        switch(bindingRangeType)
+    switch(tl->getKind())
+    {
+    case slang::TypeReflection::Kind::ConstantBuffer:
+    case slang::TypeReflection::Kind::ShaderStorageBuffer:
+    case slang::TypeReflection::Kind::ParameterBlock:
+    case slang::TypeReflection::Kind::TextureBuffer:
+        GetLayout(tl->getElementVarLayout(), pathStack, isEntryPoint);
+        break;
+    default:
+        break;
+    }
+
+    if(category != slang::ParameterCategory::None && tl->getKind() != slang::TypeReflection::Kind::ParameterBlock)
+    {
+        if(fieldCount == 0)
         {
-        default:
-            break;
-
-        // We will skip over ranges that represent sub-objects for now, and handle
-        // them in a separate pass.
-        //
-        case slang::BindingType::ParameterBlock:
-        case slang::BindingType::ConstantBuffer:
-        case slang::BindingType::ExistentialValue:
-        case slang::BindingType::PushConstant:
-            continue;
-        }
-
-
-        auto descriptorRangeCount = tl->getBindingRangeDescriptorRangeCount(r);
-        if(descriptorRangeCount == 0)
-            continue;
-        auto slangDescriptorSetIndex = tl->getBindingRangeDescriptorSetIndex(r);
-
-        auto firstDescriptorRangeIndex = tl->getBindingRangeFirstDescriptorRangeIndex(r);
-        for(int j = 0; j < descriptorRangeCount; ++j)
-        {
-            auto descriptorRangeIndex = firstDescriptorRangeIndex + j;
-            auto slangDescriptorType  = tl->getDescriptorSetDescriptorRangeType(
-                slangDescriptorSetIndex,
-                descriptorRangeIndex);
-
-            // Certain kinds of descriptor ranges reflected by Slang do not
-            // manifest as descriptors at the Vulkan level, so we will skip those.
-            //
-            switch(slangDescriptorType)
+            auto name        = GetName(pathStack);
+            auto bindingType = tl->getBindingRangeCount() == 1 ? tl->getBindingRangeType(0) : slang::BindingType::ConstantBuffer;
+            if(name.empty())
             {
-            case slang::BindingType::ExistentialValue:
-            case slang::BindingType::InlineUniformData:
-            case slang::BindingType::PushConstant:
-                continue;
-            default:
-                break;
+                // asm("int3");
             }
-
-            auto vkDescriptorType    = SlangBindingTypeToVulkan(slangDescriptorType);
-            uint32_t descriptorCount = (uint32_t)tl->getDescriptorSetDescriptorRangeDescriptorCount(
-                slangDescriptorSetIndex,
-                descriptorRangeIndex);
-
-
-            uint32_t descriptorSetIndex = isParameterBlock ? offset.subelement : offset.bindingSet;
-            uint32_t binding            = offset.binding + (uint32_t)tl->getDescriptorSetDescriptorRangeIndexOffset(slangDescriptorSetIndex, descriptorRangeIndex);
-            m_descriptorLayoutBuilders[descriptorSetIndex].AddBinding(binding, vkDescriptorType, descriptorCount);
-
-            auto leafVar = tl->getBindingRangeLeafVariable(r);
-            auto name    = leafVar ? (path + leafVar->getName()) : path.substr(0, path.length() - 1);
-
-            m_bindings[name] = {.set = descriptorSetIndex, .binding = binding, .offset = 0, .type = vkDescriptorType};
+            else
+            {
+                bool isPushConstant = slot.isPushConstant;
+                uint32_t stride     = tl->getKind() == slang::TypeReflection::Kind::Array ? tl->getElementStride(SLANG_PARAMETER_CATEGORY_UNIFORM) : 0;
+                m_bindings[name]    = {
+                       .set            = static_cast<uint32_t>(slot.set),
+                       .binding        = static_cast<uint32_t>(slot.binding),
+                       .offset         = slot.offset,
+                       .size           = tl->getSize(slang::ParameterCategory::Uniform),
+                       .stride         = stride,
+                       .type           = slot.isPushConstant ? VK_DESCRIPTOR_TYPE_MAX_ENUM : SlangBindingTypeToVulkan(bindingType),
+                       .isPushConstant = isPushConstant};
+            }
         }
     }
-    auto subObjectRangeCount = tl->getSubObjectRangeCount();
-    for(auto subObjectRangeIndex = 0; subObjectRangeIndex < subObjectRangeCount; ++subObjectRangeIndex)
-    {
-        auto bindingRangeIndex = tl->getSubObjectRangeBindingRangeIndex(subObjectRangeIndex);
-        auto bindingRangeType  = tl->getBindingRangeType(bindingRangeIndex);
 
-        auto subObjectTypeLayout = tl->getBindingRangeLeafTypeLayout(bindingRangeIndex);
-
-        auto subobjectOffsetVl  = tl->getSubObjectRangeOffset(subObjectRangeIndex);
-        auto subObjectOffset    = offset;
-        subObjectOffset        += Offset(subobjectOffsetVl);
-
-        auto varName = tl->getBindingRangeLeafVariable(bindingRangeIndex)->getName();
-        auto varPath = path + (varName ? (std::string(varName) + ".") : "");
-        switch(bindingRangeType)
-        {
-        // A `ParameterBlock<X>` never contributes descripto ranges to the
-        // decriptor sets of a parent object.
-        //
-        case slang::BindingType::ParameterBlock:
-            {
-                if(subObjectTypeLayout->getElementTypeLayout()->getSize() > 0)
-                {
-                    m_descriptorLayoutBuilders[subObjectOffset.subelement].AddBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-                    subObjectOffset.binding += 1;
-                }
-                GetLayout(subObjectTypeLayout->getElementVarLayout(), subObjectOffset, varPath, true);
-            }
-        default:
-            break;
-
-        case slang::BindingType::ExistentialValue:
-            assert(!"TODO: Idk what these are");
-            break;
-
-        case slang::BindingType::ConstantBuffer:
-            {
-                // A `ConstantBuffer<X>` range will contribute any nested descriptor
-                // ranges in `X`, along with a leading descriptor range for a
-                // uniform buffer to hold ordinary/uniform data, if there is any.
-
-                auto containerVarLayout = subObjectTypeLayout->getContainerVarLayout();
-
-                auto elementVarLayout = subObjectTypeLayout->getElementVarLayout();
-
-                auto elementTypeLayout = elementVarLayout->getTypeLayout();
-
-                Offset containerOffset  = subObjectOffset;
-                containerOffset        += Offset(subObjectTypeLayout->getContainerVarLayout());
-
-                Offset elementOffset  = subObjectOffset;
-                elementOffset        += Offset(elementVarLayout);
-
-                // If the type has ordinary uniform data fields, we need to make sure to create
-                // a descriptor set with a constant buffer binding in the case that the shader
-                // object is bound as a stand alone parameter block.
-                if(elementTypeLayout->getSize(slang::ParameterCategory::Uniform) != 0)
-                {
-                    auto descriptorSetIndex = isParameterBlock ? containerOffset.subelement : containerOffset.bindingSet;
-                    m_descriptorLayoutBuilders[descriptorSetIndex].AddBinding(containerOffset.binding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-                    if(elementTypeLayout->getKind() == slang::TypeReflection::Kind::Struct)
-                    {
-                        ParseStruct(containerOffset, elementVarLayout, varPath, containerVarLayout->getOffset());
-                    }
-                    uint64_t size = elementTypeLayout->getSize(slang::ParameterCategory::Uniform);
-
-                    m_uniformBufferInfos.push_back({descriptorSetIndex, containerOffset.binding, size, m_uniformBufferSize});
-
-                    m_uniformBufferSize += size;
-                }
-                GetLayout(elementVarLayout, elementOffset, varPath);
-            }
-            break;
-
-        case slang::BindingType::PushConstant:
-            {
-                // This case indicates a `ConstantBuffer<X>` that was marked as being
-                // used for push constants.
-                //
-                // Much of the handling is the same as for an ordinary
-                // `ConstantBuffer<X>`, but of course we need to handle the ordinary
-                // data part differently.
-
-                auto containerVarLayout = subObjectTypeLayout->getContainerVarLayout();
-
-                auto elementVarLayout  = subObjectTypeLayout->getElementVarLayout();
-                auto elementTypeLayout = elementVarLayout->getTypeLayout();
-
-                Offset containerOffset  = subObjectOffset;
-                containerOffset        += Offset(subObjectTypeLayout->getContainerVarLayout());
-
-                Offset elementOffset  = subObjectOffset;
-                elementOffset        += Offset(elementVarLayout);
-
-
-                uint32_t size = static_cast<uint32_t>(elementTypeLayout->getSize(slang::ParameterCategory::Uniform));
-                if(size > 0)
-                {
-                    auto rangeIndex = containerOffset.pushConstantRange;
-                    ParsePushConsts(rangeIndex, elementVarLayout, varPath, containerVarLayout->getOffset());
-                    VkPushConstantRange pc = {
-                        .stageFlags = VK_SHADER_STAGE_ALL,
-                        .offset     = 0xFFFFFFFF,
-                        .size       = size,
-                    };
-                    if(m_pushConstantRanges.size() <= rangeIndex)
-                    {
-                        m_pushConstantRanges.resize(rangeIndex + 1);  // we shouldnt have that many ranges so performance doesnt matter that much here
-                    }
-                    m_pushConstantRanges[rangeIndex] = pc;
-                }
-                if(elementVarLayout->getTypeLayout()->getKind() == slang::TypeReflection::Kind::Struct && varPath.empty())
-                {
-                    int fieldCount = elementVarLayout->getTypeLayout()->getFieldCount();
-
-                    for(int i = 0; i < fieldCount; i++)
-                    {
-                        auto field = elementVarLayout->getTypeLayout()->getFieldByIndex(i);
-                        Offset fieldOffset(field);
-                        fieldOffset += elementOffset;
-                        GetLayout(field, fieldOffset, std::string(field->getName()) + ".");
-                    }
-                }
-                else
-                    GetLayout(elementVarLayout, elementOffset, varPath);
-            }
-            break;
-        }
-    }
+    pathStack.pop_front();
 }
+
+
 void Shader::Reflect(slang::ProgramLayout* layout)
 {
-    auto* globals    = layout->getGlobalParamsVarLayout();
+    std::deque<slang::VariableLayoutReflection*> pathStack;
+    auto* globals = layout->getGlobalParamsVarLayout();
+
     auto* entryPoint = layout->getEntryPointByIndex(0);
 
-    GetLayout(globals, Offset(globals), "");
-    GetLayout(entryPoint->getVarLayout(), Offset(entryPoint->getVarLayout()), "");
-    SlangUInt numThreads[3];
-    entryPoint->getComputeThreadGroupSize(3, numThreads);
-    m_numThreadsX = numThreads[0];
-    m_numThreadsY = numThreads[1];
-    m_numThreadsZ = numThreads[2];
+    GetLayout(globals, pathStack, false);
+    GetLayout(entryPoint->getVarLayout(), pathStack, true);
 
-    uint32_t totalSize = 0;
-    for(size_t i = 0; i < m_pushConstantRanges.size(); ++i)
+    if(m_stage == VK_SHADER_STAGE_COMPUTE_BIT)
     {
-        m_pushConstantRanges[i].offset = totalSize;
-        for(auto& [_, binding] : m_bindings)
+        SlangUInt numThreads[3];
+        entryPoint->getComputeThreadGroupSize(3, numThreads);
+        m_numThreadsX = numThreads[0];
+        m_numThreadsY = numThreads[1];
+        m_numThreadsZ = numThreads[2];
+    }
+
+    {
+        uint32_t totalSize     = 0;
+        uint32_t initialOffset = std::numeric_limits<uint32_t>::max();
+        for(const auto& [name, binding] : m_bindings)
         {
-            if(binding.isPushConstant && binding.set == i)
-            {
-                binding.offset += totalSize;
-            }
+            if(!binding.isPushConstant)
+                continue;
+            totalSize     += binding.size;
+            initialOffset  = std::min(static_cast<uint32_t>(binding.offset), initialOffset);
         }
-        totalSize += m_pushConstantRanges[i].size;
+        m_pushConstantRange.size       = totalSize;
+        m_pushConstantRange.offset     = totalSize > 0 ? initialOffset : 0;  // don't add it if no push constants
+        m_pushConstantRange.stageFlags = m_stage;
     }
 
-    for(auto builder : m_descriptorLayoutBuilders)
+
     {
-        // NOTE: can we have non continuous descriptors? like 0 and 2 are filled but not 1
-        if(!builder.bindings.empty())
-            m_descriptorLayouts.push_back(builder.Build());
+        const uint64_t alignment = VulkanContext::GetPhysicalDeviceProperties().limits.minUniformBufferOffsetAlignment;
+        std::unordered_map<std::pair<uint32_t, uint32_t>, uint64_t, PairHash> aggregatedSizes;
+
+        for(const auto& [name, binding] : m_bindings)
+        {
+            if(binding.type != VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+                continue;
+
+            std::pair<uint32_t, uint32_t> key{binding.set, binding.binding};
+
+            aggregatedSizes[key] = std::max(aggregatedSizes[key], binding.size + binding.offset);
+        }
+
+        m_uniformBufferInfos.clear();
+        uint64_t currentOffset = 0;
+
+        for(const auto& [key, totalSize] : aggregatedSizes)
+        {
+            uint32_t setIdx     = key.first;
+            uint32_t bindingIdx = key.second;
+
+            // Align the offset according to Vulkan requirements.
+            if(alignment != 0)
+            {
+                currentOffset = (currentOffset + alignment - 1) & ~(alignment - 1);
+            }
+
+            m_uniformBufferInfos.emplace_back(setIdx, bindingIdx, totalSize, currentOffset);
+
+            currentOffset += totalSize;
+        }
+        m_uniformBufferSize = currentOffset;
     }
+
+    {
+        std::vector<std::set<uint32_t>> added(4);
+        for(const auto& [name, binding] : m_bindings)
+        {
+            uint32_t set = binding.set;
+            if(binding.isPushConstant)
+                continue;
+            if(added[set].contains(binding.binding))
+                continue;
+            m_descriptorLayoutBuilders[set].AddBinding(binding.binding, binding.type);
+            added[set].insert(binding.binding);
+        }
+        for(auto builder : m_descriptorLayoutBuilders)
+        {
+            // NOTE: can we have non continuous descriptors? like 0 and 2 are filled but not 1
+            if(!builder.bindings.empty())
+                m_descriptorLayouts.push_back(builder.Build());
+        }
+    }
+
+    // for(auto& [name, binding] : m_bindings)
+    // {
+    //     auto type = string_VkDescriptorType(binding.type);
+    //     if(binding.isPushConstant)
+    //         Log::Warn("{:30}: size:{} offset:{} stride:{} type: PushConstant", name, binding.size, binding.offset, binding.stride);
+    //     else
+    //         Log::Info("{:30}: set:{} binding:{} size:{} offset:{} stride:{} type: {}", name, binding.set, binding.binding, binding.size, binding.offset, binding.stride, type);
+    // }
 }
 
 void Shader::CreateDescriptors()
 {
     m_descriptorSets.resize(Renderer::MAX_FRAMES_IN_FLIGHT);
+
 
     for(uint32_t i = 0; i < m_descriptorLayouts.size(); i++)
     {

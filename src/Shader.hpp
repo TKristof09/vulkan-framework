@@ -7,6 +7,7 @@
 #include <cstring>
 #include <filesystem>
 #include <array>
+#include <deque>
 #include "Log.hpp"
 
 class Pipeline;
@@ -19,7 +20,7 @@ concept IsSimpleParameter = !IsAnyOf<std::remove_cvref_t<std::remove_pointer_t<s
 class Shader
 {
 public:
-    Shader(const std::string& filename, VkShaderStageFlagBits stage, std::string_view entryPoint);
+    Shader(const std::filesystem::path& path, VkShaderStageFlagBits stage, std::string_view entryPoint = "main");
     ~Shader()
     {
         for(auto layout : m_descriptorLayouts)
@@ -32,21 +33,65 @@ public:
     Shader(const Shader& other) = delete;
 
     Shader(Shader&& other) noexcept
-        : m_shaderModule(other.m_shaderModule),
-          m_stage(other.m_stage)
-    {
-        other.m_shaderModule = VK_NULL_HANDLE;
-    }
+        : m_name(std::move(other.m_name)),
+          m_shaderModule(other.m_shaderModule),
+          m_stage(other.m_stage),
 
-    Shader& operator=(const Shader& other) = delete;
+          m_descriptorLayoutBuilders(std::move(other.m_descriptorLayoutBuilders)),
+          m_descriptorLayouts(std::move(other.m_descriptorLayouts)),
+          m_descriptorSets(std::move(other.m_descriptorSets)),
+
+          m_bindings(std::move(other.m_bindings)),
+          m_pushConstantRange(std::move(other.m_pushConstantRange)),
+          m_pushConstantData(std::move(other.m_pushConstantData)),
+
+          m_uniformBuffers(std::move(other.m_uniformBuffers)),
+          m_uniformBufferInfos(std::move(other.m_uniformBufferInfos)),
+          m_uniformBufferSize(other.m_uniformBufferSize),
+
+          m_numThreadsX(other.m_numThreadsX),
+          m_numThreadsY(other.m_numThreadsY),
+          m_numThreadsZ(other.m_numThreadsZ)
+    {
+        other.m_shaderModule      = VK_NULL_HANDLE;
+        other.m_stage             = {};
+        other.m_uniformBufferSize = 0;
+    }
 
     Shader& operator=(Shader&& other) noexcept
     {
-        if(this == &other)
-            return *this;
-        m_shaderModule       = other.m_shaderModule;
-        other.m_shaderModule = VK_NULL_HANDLE;
-        m_stage              = other.m_stage;
+        if(this != &other)
+        {
+            for(auto layout : m_descriptorLayouts)
+                vkDestroyDescriptorSetLayout(VulkanContext::GetDevice(), layout, nullptr);
+            m_descriptorLayouts.clear();
+
+            DestroyShaderModule();
+
+            m_name         = std::move(other.m_name);
+            m_shaderModule = other.m_shaderModule;
+            m_stage        = other.m_stage;
+
+            m_descriptorLayoutBuilders = std::move(other.m_descriptorLayoutBuilders);
+            m_descriptorLayouts        = std::move(other.m_descriptorLayouts);
+            m_descriptorSets           = std::move(other.m_descriptorSets);
+
+            m_bindings          = std::move(other.m_bindings);
+            m_pushConstantRange = std::move(other.m_pushConstantRange);
+            m_pushConstantData  = std::move(other.m_pushConstantData);
+
+            m_uniformBuffers     = std::move(other.m_uniformBuffers);
+            m_uniformBufferInfos = std::move(other.m_uniformBufferInfos);
+            m_uniformBufferSize  = other.m_uniformBufferSize;
+
+            m_numThreadsX = other.m_numThreadsX;
+            m_numThreadsY = other.m_numThreadsY;
+            m_numThreadsZ = other.m_numThreadsZ;
+
+            other.m_shaderModule      = VK_NULL_HANDLE;
+            other.m_stage             = {};
+            other.m_uniformBufferSize = 0;
+        }
         return *this;
     }
 
@@ -94,9 +139,9 @@ private:
     };
     bool Compile(const std::filesystem::path& path, std::string_view entryPoint);
     void Reflect(slang::ProgramLayout* layout);
-    void GetLayout(slang::VariableLayoutReflection* vl, Offset offset, std::string path, bool isParameterBlock = false);
-    void ParsePushConsts(uint32_t rangeIndex, slang::VariableLayoutReflection* var, std::string path, uint32_t offset);
-    void ParseStruct(Offset binding, slang::VariableLayoutReflection* var, std::string path, uint32_t offset);
+
+    void GetLayout(slang::VariableLayoutReflection* vl, std::deque<slang::VariableLayoutReflection*>& pathStack, bool isEntryPoint);
+
 
     void CreateDescriptors();
 
@@ -144,7 +189,7 @@ private:
     };
     std::unordered_map<std::string, Binding, string_hash, std::equal_to<>> m_bindings;
 
-    std::vector<VkPushConstantRange> m_pushConstantRanges;
+    VkPushConstantRange m_pushConstantRange;
     std::vector<uint8_t> m_pushConstantData;
 
     std::vector<Buffer> m_uniformBuffers;

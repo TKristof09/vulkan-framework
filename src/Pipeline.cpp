@@ -248,10 +248,10 @@ void Pipeline::CreateComputePipeline()
 
     VkPipelineLayoutCreateInfo layoutCreateInfo = {};
     layoutCreateInfo.sType                      = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    layoutCreateInfo.setLayoutCount             = m_shaders[0].m_descriptorLayouts.size();
-    layoutCreateInfo.pSetLayouts                = m_shaders[0].m_descriptorLayouts.data();
-    layoutCreateInfo.pushConstantRangeCount     = m_shaders[0].m_pushConstants.size();
-    layoutCreateInfo.pPushConstantRanges        = m_shaders[0].m_pushConstants.data();
+    layoutCreateInfo.setLayoutCount             = m_shaders[0]->m_descriptorLayouts.size();
+    layoutCreateInfo.pSetLayouts                = m_shaders[0]->m_descriptorLayouts.data();
+    layoutCreateInfo.pushConstantRangeCount     = m_shaders[0]->m_pushConstantRange.size > 0 ? 1 : 0;
+    layoutCreateInfo.pPushConstantRanges        = &m_shaders[0]->m_pushConstantRange;
 
 
     VK_CHECK(vkCreatePipelineLayout(VulkanContext::GetDevice(), &layoutCreateInfo, nullptr, &m_layout), "Failed to create compute pipeline layout");
