@@ -58,26 +58,39 @@ FetchContent_Declare(stb
     SYSTEM
 )
 
-set(SLANG_ENABLE_SLANGC OFF)
-set(SLANG_ENABLE_SLANGI OFF)
-set(SLANG_ENABLE_SLANGD OFF)
-set(SLANG_ENABLE_CUDA OFF)
-set(SLANG_ENABLE_OPTIX OFF)
-set(SLANG_ENABLE_NVAPI OFF)
-set(SLANG_ENABLE_AFTERMATH OFF)
-set(SLANG_ENABLE_RHI OFF)
-set(SLANG_ENABLE_GFX OFF)
-set(SLANG_ENABLE_TESTS OFF)
-set(SLANG_ENABLE_EXAMPLES OFF)
-set(SLANG_ENABLE_SPLIT_DEBUG_INFO OFF)
+set(SLANG_VERSION "vulkan-sdk-${Vulkan_VERSION}.0")
+
+# Determine the platform and set the appropriate archive URL
+if(WIN32)
+    # Windows URL (x64)
+    set(SLANG_ARCHIVE_URL "https://github.com/shader-slang/slang/releases/download/${SLANG_VERSION}/slang-${SLANG_VERSION}-windows-x86_64.tar.gz")
+elseif(LINUX)
+    # Linux URL (x64)
+    set(SLANG_ARCHIVE_URL "https://github.com/shader-slang/slang/releases/download/${SLANG_VERSION}/slang-${SLANG_VERSION}-linux-x86_64.tar.gz")
+endif()
+
+# FetchContent block to download the archive
 FetchContent_Declare(slang
-    GIT_REPOSITORY https://github.com/shader-slang/slang
-    GIT_TAG vulkan-sdk-${Vulkan_VERSION}.0
+    URL ${SLANG_ARCHIVE_URL}
+    # FIND_PACKAGE_ARGS CONFIG REQUIRED
+)
+
+set(TINYGLTF_HEADER_ONLY ON CACHE INTERNAL "" FORCE)
+set(TINYGLTF_INSTALL OFF CACHE INTERNAL "" FORCE)
+set(TINYGLTF_INSTALL_VENDOR OFF CACHE INTERNAL "" FORCE)
+set(TINYGLTF_BUILD_LOADER_EXAMPLE OFF CACHE INTERNAL "" FORCE)
+FetchContent_Declare(tiny_gltf
+    GIT_REPOSITORY https://github.com/syoyo/tinygltf 
+    GIT_TAG v2.9.6
     GIT_SHALLOW TRUE
     SYSTEM
 )
 
-FetchContent_MakeAvailable(glm Vulkan-Utility-Libraries VulkanMemoryAllocator glfw slang imgui stb)
+
+FetchContent_MakeAvailable(glm Vulkan-Utility-Libraries VulkanMemoryAllocator glfw slang imgui stb tiny_gltf)
+
+set(slang_DIR "${slang_SOURCE_DIR}/cmake")
+find_package(slang CONFIG REQUIRED)
 
 # --- Create a custom target for Dear ImGui ---
 # Glob the core ImGui source files
@@ -122,14 +135,15 @@ target_include_directories(stb_image PUBLIC ${stb_SOURCE_DIR})
 
 target_link_libraries(VulkanFramework 
     PUBLIC 
-        glfw GPUOpen::VulkanMemoryAllocator slang
-        Vulkan::Vulkan Vulkan::UtilityHeaders glm::glm imgui_vulkan stb_image
+        glfw GPUOpen::VulkanMemoryAllocator
+        Vulkan::Vulkan Vulkan::UtilityHeaders glm::glm imgui_vulkan stb_image tinygltf
+        slang::slang
     )
 
 target_include_directories(VulkanFramework 
     PUBLIC 
-        ${CMAKE_CURRENT_SOURCE_DIR}/src)
-
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
 # target_precompile_headers(VulkanFramework 
 #     PRIVATE 
 #     PUBLIC
@@ -170,3 +184,4 @@ add_custom_target(copy-compile-commands ALL
         ${CMAKE_BINARY_DIR}/compile_commands.json
         ${CMAKE_SOURCE_DIR}/compile_commands.json
 )
+
