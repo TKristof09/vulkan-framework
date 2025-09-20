@@ -35,8 +35,11 @@ Shader::Shader(const std::filesystem::path& path, VkShaderStageFlagBits stage, s
     {
         abort();
     }
+}
+void Shader::Finalize(Pipeline* pipeline)
+{
+    m_pipeline = pipeline;
 
-    CreateDescriptors();
     if(m_uniformBufferSize > 0)
     {
         for(int i = 0; i < Renderer::MAX_FRAMES_IN_FLIGHT; i++)
@@ -52,7 +55,7 @@ Shader::Shader(const std::filesystem::path& path, VkShaderStageFlagBits stage, s
                 descriptorWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
                 descriptorWrite.descriptorCount = 1;
                 descriptorWrite.dstBinding      = binding;
-                descriptorWrite.dstSet          = m_descriptorSets[i][set];
+                descriptorWrite.dstSet          = pipeline->m_descriptorSets[i][set];
                 descriptorWrite.descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 
                 VkDescriptorBufferInfo bufferInfo{};
@@ -70,8 +73,6 @@ Shader::Shader(const std::filesystem::path& path, VkShaderStageFlagBits stage, s
 }
 void Shader::BindResources(CommandBuffer& cb, uint32_t frameIndex, VkPipelineLayout layout, VkPipelineBindPoint bindPoint) const
 {
-    vkCmdBindDescriptorSets(cb.GetCommandBuffer(), bindPoint, layout, 0, m_descriptorSets[frameIndex].size(), m_descriptorSets[frameIndex].data(), 0, nullptr);
-
     if(m_pushConstantRange.size > 0)
         vkCmdPushConstants(cb.GetCommandBuffer(), layout, m_stage, m_pushConstantRange.offset, m_pushConstantRange.size, &m_pushConstantData[m_pushConstantRange.offset]);
 }
@@ -88,8 +89,6 @@ void Shader::Dispatch(CommandBuffer& cb, uint32_t threadCountX, uint32_t threadC
 
 bool Shader::Compile(const std::filesystem::path& path, std::string_view entryPoint)
 {
-    std::filesystem::path cwd = std::filesystem::current_path();
-    Log::Info("CWD: {}", cwd.string());
     if(!globalSession.get())
         createGlobalSession(globalSession.writeRef());
 
@@ -109,11 +108,11 @@ bool Shader::Compile(const std::filesystem::path& path, std::string_view entryPo
     sessionDesc.searchPaths               = searchPath.data();
     sessionDesc.searchPathCount           = searchPath.size();
 
-    std::array<slang::CompilerOptionEntry, 2> options = {
-        {{slang::CompilerOptionName::EmitSpirvDirectly,
-          {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}},
-         {slang::CompilerOptionName::DebugInformation,
-          {slang::CompilerOptionValueKind::Int, SlangDebugInfoLevel::SLANG_DEBUG_INFO_LEVEL_MAXIMAL, 0, nullptr, nullptr}}}
+    std::vector<slang::CompilerOptionEntry> options = {
+        {
+         {slang::CompilerOptionName::EmitSpirvDirectly, {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}},
+         {slang::CompilerOptionName::DebugInformation, {slang::CompilerOptionValueKind::Int, SlangDebugInfoLevel::SLANG_DEBUG_INFO_LEVEL_MAXIMAL, 0, nullptr, nullptr}},
+         }
     };
     sessionDesc.compilerOptionEntries    = options.data();
     sessionDesc.compilerOptionEntryCount = options.size();
@@ -240,7 +239,7 @@ BindingSlot CalculateOffset(const std::deque<slang::VariableLayoutReflection*>& 
 
             if(foundCB)
             {
-                slot.set     += v->getOffset(slang::ParameterCategory::RegisterSpace) + v->getOffset(slang::ParameterCategory::SubElementRegisterSpace);
+                slot.set     += v->getBindingSpace(slang::ParameterCategory::DescriptorTableSlot) + v->getOffset(slang::ParameterCategory::SubElementRegisterSpace);
                 slot.binding += v->getOffset(slang::ParameterCategory::DescriptorTableSlot);
 
                 if(slot.isPushConstant)
@@ -248,7 +247,7 @@ BindingSlot CalculateOffset(const std::deque<slang::VariableLayoutReflection*>& 
             }
             else if(v->getTypeLayout()->getKind() == slang::TypeReflection::Kind::ConstantBuffer)
             {
-                slot.set     = v->getOffset(slang::ParameterCategory::RegisterSpace) + v->getOffset(slang::ParameterCategory::SubElementRegisterSpace);
+                slot.set     = v->getBindingSpace(slang::ParameterCategory::DescriptorTableSlot) + v->getOffset(slang::ParameterCategory::SubElementRegisterSpace);
                 slot.binding = v->getOffset(slang::ParameterCategory::DescriptorTableSlot);
 
                 foundCB = true;
@@ -264,7 +263,7 @@ BindingSlot CalculateOffset(const std::deque<slang::VariableLayoutReflection*>& 
     {
         for(const auto v : path)
         {
-            slot.set     += v->getOffset(slang::ParameterCategory::RegisterSpace) + v->getOffset(slang::ParameterCategory::SubElementRegisterSpace);
+            slot.set     += v->getBindingSpace(slang::ParameterCategory::DescriptorTableSlot) + v->getOffset(slang::ParameterCategory::SubElementRegisterSpace);
             slot.binding += v->getOffset(slang::ParameterCategory::DescriptorTableSlot);
 
             // TODO this doesnt make sense? I think only uniforms can go in PC
@@ -325,28 +324,51 @@ void Shader::GetLayout(slang::VariableLayoutReflection* vl, std::deque<slang::Va
         break;
     }
 
-    if(category != slang::ParameterCategory::None && tl->getKind() != slang::TypeReflection::Kind::ParameterBlock)
+    auto kind = tl->getKind();
+    if(category != slang::ParameterCategory::None && kind != slang::TypeReflection::Kind::ParameterBlock && category != slang::ParameterCategory::RayPayload && category != slang::ParameterCategory::HitAttributes)
     {
         if(fieldCount == 0)
         {
             auto name        = GetName(pathStack);
             auto bindingType = tl->getBindingRangeCount() == 1 ? tl->getBindingRangeType(0) : slang::BindingType::ConstantBuffer;
+
             if(name.empty())
             {
                 // asm("int3");
             }
             else
             {
-                bool isPushConstant = slot.isPushConstant;
-                uint32_t stride     = tl->getKind() == slang::TypeReflection::Kind::Array ? tl->getElementStride(SLANG_PARAMETER_CATEGORY_UNIFORM) : 0;
-                m_bindings[name]    = {
-                       .set            = static_cast<uint32_t>(slot.set),
-                       .binding        = static_cast<uint32_t>(slot.binding),
-                       .offset         = slot.offset,
-                       .size           = tl->getSize(slang::ParameterCategory::Uniform),
-                       .stride         = stride,
-                       .type           = slot.isPushConstant ? VK_DESCRIPTOR_TYPE_MAX_ENUM : SlangBindingTypeToVulkan(bindingType),
-                       .isPushConstant = isPushConstant};
+                bool isPushConstant     = slot.isPushConstant || bindingType == slang::BindingType::PushConstant;
+                bool isStructuredBuffer = tl->getKind() == slang::TypeReflection::Kind::Resource && tl->getResourceShape() == SlangResourceShape::SLANG_STRUCTURED_BUFFER;
+                uint32_t stride         = tl->getKind() == slang::TypeReflection::Kind::Array ? tl->getElementStride(SLANG_PARAMETER_CATEGORY_UNIFORM) : 0;
+                if(isStructuredBuffer)
+                    stride = tl->getElementTypeLayout()->getStride();
+
+                if(bindingType == slang::BindingType::PushConstant)
+                {
+                    uint32_t size = tl->getElementTypeLayout()->getSize(slang::ParameterCategory::Uniform);
+                    if(m_pushConstantSizes.size() <= slot.pushConstant)
+                    {
+                        m_pushConstantSizes.resize(slot.pushConstant + 1);  // we shouldnt have that many ranges so performance doesnt matter that much here
+                    }
+                    m_pushConstantSizes[slot.pushConstant] = size;
+                }
+                else
+                {
+                    uint64_t size = tl->getSize(slang::ParameterCategory::Uniform);
+
+                    m_bindings[name] = {
+                        .set               = isPushConstant ? static_cast<uint32_t>(slot.pushConstant) : static_cast<uint32_t>(slot.set),
+                        .binding           = static_cast<uint32_t>(slot.binding),
+                        .offset            = slot.offset,
+                        .size              = size,
+                        .stride            = stride,
+                        .arrayElementCount = tl->getTotalArrayElementCount(),
+                        .type              = slot.isPushConstant ? VK_DESCRIPTOR_TYPE_MAX_ENUM : SlangBindingTypeToVulkan(bindingType),
+                        .isPushConstant    = isPushConstant,
+                        .isVariableSize    = tl->getKind() == slang::TypeReflection::Kind::Array && tl->getTotalArrayElementCount() == 0,
+                    };
+                }
             }
         }
     }
@@ -377,10 +399,18 @@ void Shader::Reflect(slang::ProgramLayout* layout)
     {
         uint32_t totalSize     = 0;
         uint32_t initialOffset = std::numeric_limits<uint32_t>::max();
-        for(const auto& [name, binding] : m_bindings)
+        for(auto& [name, binding] : m_bindings)
         {
             if(!binding.isPushConstant)
                 continue;
+
+            uint32_t baseOffset = 0;
+            for(uint32_t i = 0; i < binding.set; i++)
+            {
+                baseOffset += m_pushConstantSizes[i];
+            }
+            binding.offset += baseOffset;
+
             totalSize     += binding.size;
             initialOffset  = std::min(static_cast<uint32_t>(binding.offset), initialOffset);
         }
@@ -437,52 +467,18 @@ void Shader::Reflect(slang::ProgramLayout* layout)
             m_descriptorLayoutBuilders[set].AddBinding(binding.binding, binding.type);
             added[set].insert(binding.binding);
         }
-        for(auto builder : m_descriptorLayoutBuilders)
-        {
-            // NOTE: can we have non continuous descriptors? like 0 and 2 are filled but not 1
-            if(!builder.bindings.empty())
-                m_descriptorLayouts.push_back(builder.Build());
-        }
     }
 
-    // for(auto& [name, binding] : m_bindings)
-    // {
-    //     auto type = string_VkDescriptorType(binding.type);
-    //     if(binding.isPushConstant)
-    //         Log::Warn("{:30}: size:{} offset:{} stride:{} type: PushConstant", name, binding.size, binding.offset, binding.stride);
-    //     else
-    //         Log::Info("{:30}: set:{} binding:{} size:{} offset:{} stride:{} type: {}", name, binding.set, binding.binding, binding.size, binding.offset, binding.stride, type);
-    // }
+    for(auto& [name, binding] : m_bindings)
+    {
+        auto type = string_VkDescriptorType(binding.type);
+        if(binding.isPushConstant)
+            Log::Info("{:30}: size:{} offset:{} stride:{} elementCount:{} type: PushConstant", name, binding.size, binding.offset, binding.stride, binding.arrayElementCount);
+        else
+            Log::Info("{:30}: set:{} binding:{} size:{} offset:{} stride:{} elementCount:{} type: {} variableSized:{}", name, binding.set, binding.binding, binding.size, binding.offset, binding.stride, binding.arrayElementCount, type, binding.isVariableSize);
+    }
 }
 
-void Shader::CreateDescriptors()
-{
-    m_descriptorSets.resize(Renderer::MAX_FRAMES_IN_FLIGHT);
-
-
-    for(uint32_t i = 0; i < m_descriptorLayouts.size(); i++)
-    {
-        auto name = std::format("dsl_{}_{}", m_name, i);
-        VK_SET_DEBUG_NAME(m_descriptorLayouts[i], VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, name.c_str());
-    }
-    for(int frameIndex = 0; frameIndex < Renderer::MAX_FRAMES_IN_FLIGHT; frameIndex++)
-    {
-        VkDescriptorSetAllocateInfo allocInfo{};
-        allocInfo.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.descriptorPool     = VulkanContext::GetDescriptorPool();
-        allocInfo.descriptorSetCount = static_cast<uint32_t>(m_descriptorLayouts.size());
-        allocInfo.pSetLayouts        = m_descriptorLayouts.data();
-
-        m_descriptorSets[frameIndex].resize(m_descriptorLayouts.size());
-
-        VK_CHECK(vkAllocateDescriptorSets(VulkanContext::GetDevice(), &allocInfo, m_descriptorSets[frameIndex].data()), "Failed to allocate descriptors");
-        for(uint32_t i = 0; i < m_descriptorLayouts.size(); i++)
-        {
-            auto name = std::format("ds_{}_{}_{}", m_name, frameIndex, i);
-            VK_SET_DEBUG_NAME(m_descriptorSets[frameIndex][i], VK_OBJECT_TYPE_DESCRIPTOR_SET, name.c_str());
-        }
-    }
-}
 void Shader::SetParameter(uint32_t frameIndex, std::string_view name, const Image* image)
 {
     auto it = m_bindings.find(name);
@@ -504,7 +500,7 @@ void Shader::SetParameter(uint32_t frameIndex, std::string_view name, const Imag
         descriptorWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrite.descriptorCount = 1;
         descriptorWrite.dstBinding      = binding.binding;
-        descriptorWrite.dstSet          = m_descriptorSets[frameIndex][binding.set];
+        descriptorWrite.dstSet          = m_pipeline->m_descriptorSets[frameIndex][binding.set];
         descriptorWrite.descriptorType  = binding.type;
 
         VkDescriptorImageInfo imageInfo{};
@@ -541,11 +537,16 @@ void Shader::SetParameter(uint32_t frameIndex, std::string_view name, const Buff
             return;
         }
 
+        if(buffer->GetSize() % binding.stride != 0)
+        {
+            Log::Warn("Trying to update binding {} with a buffer whose size ({}) isn't divisible by the stride ({}). This may indicate a bug in your code", name, buffer->GetSize(), binding.stride);
+        }
+
         VkWriteDescriptorSet descriptorWrite{};
         descriptorWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrite.descriptorCount = 1;
         descriptorWrite.dstBinding      = binding.binding;
-        descriptorWrite.dstSet          = m_descriptorSets[frameIndex][binding.set];
+        descriptorWrite.dstSet          = m_pipeline->m_descriptorSets[frameIndex][binding.set];
         descriptorWrite.descriptorType  = binding.type;
 
         VkDescriptorBufferInfo bufferInfo{};
@@ -591,7 +592,7 @@ void Shader::SetParameter(uint32_t frameIndex, std::string_view name, const Rayt
         descriptorWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrite.descriptorCount = 1;
         descriptorWrite.dstBinding      = binding.binding;
-        descriptorWrite.dstSet          = m_descriptorSets[frameIndex][binding.set];
+        descriptorWrite.dstSet          = m_pipeline->m_descriptorSets[frameIndex][binding.set];
         descriptorWrite.descriptorType  = binding.type;
         descriptorWrite.pNext           = &descriptorAccelerationStructureInfo;
 

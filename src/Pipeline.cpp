@@ -2,6 +2,8 @@
 #include "VulkanContext.hpp"
 #include "Log.hpp"
 #include <cassert>
+#include "Renderer.hpp"
+#include "Shader.hpp"
 
 Pipeline::Pipeline(const std::string& shaderName, PipelineCreateInfo createInfo)
     : m_name(shaderName),
@@ -59,6 +61,13 @@ void Pipeline::Setup()
     }
 
 
+    CreateDescriptors();
+
+    for(auto& shader : m_shaders)
+    {
+        shader->Finalize(this);
+    }
+
     switch(m_createInfo.type)
     {
     case PipelineType::GRAPHICS:
@@ -84,10 +93,61 @@ Pipeline::~Pipeline()
 {
     if(m_pipeline != VK_NULL_HANDLE)
     {
+        for(auto layout : m_descriptorLayouts)
+        {
+            vkDestroyDescriptorSetLayout(VulkanContext::GetDevice(), layout, nullptr);
+        }
         vkDestroyPipeline(VulkanContext::GetDevice(), m_pipeline, nullptr);
         vkDestroyPipelineLayout(VulkanContext::GetDevice(), m_layout, nullptr);
 
         m_pipeline = VK_NULL_HANDLE;
+    }
+}
+
+void Pipeline::CreateDescriptors()
+{
+    std::array<DescriptorSetLayoutBuilder, 4> descriptorLayoutBuilders;
+    for(const auto& shader : m_shaders)
+    {
+        for(uint32_t i = 0; i < descriptorLayoutBuilders.size(); i++)
+        {
+            descriptorLayoutBuilders[i] += shader->m_descriptorLayoutBuilders[i];
+        }
+    }
+    for(auto builder : descriptorLayoutBuilders)
+    {
+        // NOTE: can we have non continuous descriptors? like 0 and 2 are filled but not 1
+        if(!builder.bindings.empty())
+            m_descriptorLayouts.push_back(builder.Build());
+    }
+
+    if(m_descriptorLayouts.size() == 0)
+        return;
+
+    m_descriptorSets.resize(Renderer::MAX_FRAMES_IN_FLIGHT);
+
+
+    for(uint32_t i = 0; i < m_descriptorLayouts.size(); i++)
+    {
+        auto name = std::format("dsl_{}_{}", m_name, i);
+        VK_SET_DEBUG_NAME(m_descriptorLayouts[i], VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, name.c_str());
+    }
+    for(int frameIndex = 0; frameIndex < Renderer::MAX_FRAMES_IN_FLIGHT; frameIndex++)
+    {
+        VkDescriptorSetAllocateInfo allocInfo{};
+        allocInfo.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocInfo.descriptorPool     = VulkanContext::GetDescriptorPool();
+        allocInfo.descriptorSetCount = static_cast<uint32_t>(m_descriptorLayouts.size());
+        allocInfo.pSetLayouts        = m_descriptorLayouts.data();
+
+        m_descriptorSets[frameIndex].resize(m_descriptorLayouts.size());
+
+        VK_CHECK(vkAllocateDescriptorSets(VulkanContext::GetDevice(), &allocInfo, m_descriptorSets[frameIndex].data()), "Failed to allocate descriptors");
+        for(uint32_t i = 0; i < m_descriptorLayouts.size(); i++)
+        {
+            auto name = std::format("ds_{}_{}_{}", m_name, frameIndex, i);
+            VK_SET_DEBUG_NAME(m_descriptorSets[frameIndex][i], VK_OBJECT_TYPE_DESCRIPTOR_SET, name.c_str());
+        }
     }
 }
 
@@ -283,8 +343,8 @@ void Pipeline::CreateComputePipeline()
 
     VkPipelineLayoutCreateInfo layoutCreateInfo = {};
     layoutCreateInfo.sType                      = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    layoutCreateInfo.setLayoutCount             = m_shaders[0]->m_descriptorLayouts.size();
-    layoutCreateInfo.pSetLayouts                = m_shaders[0]->m_descriptorLayouts.data();
+    layoutCreateInfo.setLayoutCount             = m_descriptorLayouts.size();
+    layoutCreateInfo.pSetLayouts                = m_descriptorLayouts.data();
     layoutCreateInfo.pushConstantRangeCount     = m_shaders[0]->m_pushConstantRange.size > 0 ? 1 : 0;
     layoutCreateInfo.pPushConstantRanges        = &m_shaders[0]->m_pushConstantRange;
 
@@ -310,15 +370,20 @@ void Pipeline::CreateComputePipeline()
 
 void Pipeline::CreateRaytracingPipeline()
 {
-    std::vector<VkDescriptorSetLayout> descSetLayouts;
+    std::vector<VkPushConstantRange> pushConstantRanges;
     for(const auto& shader : m_shaders)
     {
-        descSetLayouts.append_range(shader->m_descriptorLayouts);
+        if(shader->m_pushConstantRange.size > 0)
+        {
+            pushConstantRanges.push_back(shader->m_pushConstantRange);
+        }
     }
     VkPipelineLayoutCreateInfo pipelineLayoutCI{};
-    pipelineLayoutCI.sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutCI.setLayoutCount = descSetLayouts.size();
-    pipelineLayoutCI.pSetLayouts    = descSetLayouts.data();
+    pipelineLayoutCI.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutCI.setLayoutCount         = m_descriptorLayouts.size();
+    pipelineLayoutCI.pSetLayouts            = m_descriptorLayouts.data();
+    pipelineLayoutCI.pushConstantRangeCount = pushConstantRanges.size();
+    pipelineLayoutCI.pPushConstantRanges    = pushConstantRanges.data();
     VK_CHECK(vkCreatePipelineLayout(VulkanContext::GetDevice(), &pipelineLayoutCI, nullptr, &m_layout), "Failed to create pipeline layout");
 
     std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
@@ -466,9 +531,13 @@ void Pipeline::Bind(CommandBuffer& cb, uint32_t frameIndex) const
         bindPoint = VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR;
         break;
     }
+    if(!m_descriptorSets.empty())
+    {
+        vkCmdBindDescriptorSets(cb.GetCommandBuffer(), bindPoint, m_layout, 0, m_descriptorSets[frameIndex].size(), m_descriptorSets[frameIndex].data(), 0, nullptr);
+    }
     for(auto& shader : m_shaders)
     {
-        // FIXME: currently these can overwrite eachother. e.g. when using ray tracing only the last shader's descriptor gets bound everywhere
+        // FIXME: push constants don't work if multiple stages use the same range. In this case we'd need to specify every stage flag in the vkCmdPushConstants call which we aren't doing yet
         shader->BindResources(cb, frameIndex, m_layout, bindPoint);
     }
     vkCmdBindPipeline(cb.GetCommandBuffer(), bindPoint, m_pipeline);

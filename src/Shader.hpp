@@ -10,8 +10,8 @@
 #include <array>
 #include <deque>
 #include "Log.hpp"
+#include "Pipeline.hpp"
 
-class Pipeline;
 
 template<typename T, typename... U>
 concept IsAnyOf = (std::same_as<T, U> || ...);
@@ -24,10 +24,6 @@ public:
     Shader(const std::filesystem::path& path, VkShaderStageFlagBits stage, std::string_view entryPoint = "main");
     ~Shader()
     {
-        for(auto layout : m_descriptorLayouts)
-        {
-            vkDestroyDescriptorSetLayout(VulkanContext::GetDevice(), layout, nullptr);
-        }
         DestroyShaderModule();
     }
 
@@ -39,8 +35,6 @@ public:
           m_stage(other.m_stage),
 
           m_descriptorLayoutBuilders(std::move(other.m_descriptorLayoutBuilders)),
-          m_descriptorLayouts(std::move(other.m_descriptorLayouts)),
-          m_descriptorSets(std::move(other.m_descriptorSets)),
 
           m_bindings(std::move(other.m_bindings)),
           m_pushConstantRange(std::move(other.m_pushConstantRange)),
@@ -63,10 +57,6 @@ public:
     {
         if(this != &other)
         {
-            for(auto layout : m_descriptorLayouts)
-                vkDestroyDescriptorSetLayout(VulkanContext::GetDevice(), layout, nullptr);
-            m_descriptorLayouts.clear();
-
             DestroyShaderModule();
 
             m_name         = std::move(other.m_name);
@@ -74,8 +64,6 @@ public:
             m_stage        = other.m_stage;
 
             m_descriptorLayoutBuilders = std::move(other.m_descriptorLayoutBuilders);
-            m_descriptorLayouts        = std::move(other.m_descriptorLayouts);
-            m_descriptorSets           = std::move(other.m_descriptorSets);
 
             m_bindings          = std::move(other.m_bindings);
             m_pushConstantRange = std::move(other.m_pushConstantRange);
@@ -116,6 +104,7 @@ private:
     friend class Renderer;
     friend class Pipeline;
 
+    void Finalize(Pipeline* pipeline);
 
     struct Offset
     {
@@ -165,20 +154,21 @@ private:
     std::string m_name;
     VkShaderModule m_shaderModule;
     VkShaderStageFlagBits m_stage;
+    Pipeline* m_pipeline;
 
     struct Binding
     {
-        uint32_t set     = 0;
-        uint32_t binding = 0;
-        uint64_t offset  = 0;
-        uint64_t size    = 0;
-        uint32_t stride  = 0;
+        uint32_t set               = 0;
+        uint32_t binding           = 0;
+        uint64_t offset            = 0;
+        uint64_t size              = 0;
+        uint32_t stride            = 0;
+        uint64_t arrayElementCount = 0;
         VkDescriptorType type;
         bool isPushConstant = false;
+        bool isVariableSize = false;
     };
     std::array<DescriptorSetLayoutBuilder, 4> m_descriptorLayoutBuilders;
-    std::vector<VkDescriptorSetLayout> m_descriptorLayouts;
-    std::vector<std::vector<VkDescriptorSet>> m_descriptorSets;
 
     struct string_hash
     {
@@ -191,7 +181,10 @@ private:
     };
     std::unordered_map<std::string, Binding, string_hash, std::equal_to<>> m_bindings;
 
+    // NOTE: I assume that slang attributes a single contiguous range for a
+    // shader, I can't think of a situtation that would result otherwise
     VkPushConstantRange m_pushConstantRange;
+    std::vector<uint32_t> m_pushConstantSizes;
     std::vector<uint8_t> m_pushConstantData;
 
     std::vector<Buffer> m_uniformBuffers;

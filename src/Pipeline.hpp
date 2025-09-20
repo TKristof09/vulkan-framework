@@ -2,10 +2,12 @@
 
 #include "CommandBuffer.hpp"
 #include "VulkanContext.hpp"
-#include "Shader.hpp"
+#include <memory>
 #include <volk.h>
 #include <optional>
+#include "Buffer.hpp"
 
+class Shader;
 
 enum class PipelineType
 {
@@ -115,6 +117,7 @@ private:
 
     void Setup();
 
+    void CreateDescriptors();
     void CreateGraphicsPipeline();
     void CreateComputePipeline();
     void CreateRaytracingPipeline();
@@ -148,4 +151,7 @@ private:
 
     SBT m_sbt;
     Buffer m_sbtBuffer;
+
+    std::vector<VkDescriptorSetLayout> m_descriptorLayouts;
+    std::vector<std::vector<VkDescriptorSet>> m_descriptorSets;
 };

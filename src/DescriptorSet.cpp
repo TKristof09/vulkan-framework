@@ -1,5 +1,6 @@
 #include "DescriptorSet.hpp"
 #include "VulkanContext.hpp"
+#include <set>
 
 void DescriptorSetLayoutBuilder::AddBinding(uint32_t binding, VkDescriptorType t, uint32_t count)
 {
@@ -25,4 +26,19 @@ VkDescriptorSetLayout DescriptorSetLayoutBuilder::Build(VkShaderStageFlags stage
     VkDescriptorSetLayout layout;
     VK_CHECK(vkCreateDescriptorSetLayout(VulkanContext::GetDevice(), &ci, nullptr, &layout), "Failed to create descriptor set layout");
     return layout;
+}
+
+
+void DescriptorSetLayoutBuilder::operator+=(const DescriptorSetLayoutBuilder& other)
+{
+    bindings.append_range(other.bindings);
+    std::set<uint32_t> s;
+    for(auto binding : bindings)
+    {
+        if(s.contains(binding.binding))
+        {
+            Log::Error("Same binding {} defined in multiple shaders, this behaviour is not allowed", binding.binding);
+        }
+        s.insert(binding.binding);
+    }
 }
