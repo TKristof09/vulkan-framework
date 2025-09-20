@@ -15,7 +15,7 @@ set_property(TARGET VulkanFramework PROPERTY CXX_STANDARD 23)
 set_property(TARGET VulkanFramework PROPERTY STANDARD_REQUIRED ON)
 
 
-find_package(Vulkan REQUIRED COMPONENTS SPIRV-Tools)
+find_package(Vulkan REQUIRED COMPONENTS SPIRV-Tools volk)
 
 FetchContent_Declare(glm
     GIT_REPOSITORY https://github.com/g-truc/glm.git
@@ -115,12 +115,13 @@ add_library(imgui_vulkan STATIC
 target_include_directories(imgui_vulkan PUBLIC
     ${imgui_SOURCE_DIR}
 )
+target_compile_definitions(imgui_vulkan PRIVATE IMGUI_IMPL_VULKAN_USE_VOLK)
 set_target_properties(imgui_vulkan PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # The ImGui backends have their own dependencies (Vulkan and GLFW)
 # We make them PUBLIC so that any target linking against 'imgui' also links to them.
 target_link_libraries(imgui_vulkan PUBLIC
-    Vulkan::Vulkan
+    Vulkan::Headers Vulkan::volk
     glfw
 )
 
@@ -132,11 +133,10 @@ endif()
 add_library(stb_image STATIC "${STB_WRAPPER}")
 target_include_directories(stb_image PUBLIC ${stb_SOURCE_DIR})
 
-
 target_link_libraries(VulkanFramework 
     PUBLIC 
         glfw GPUOpen::VulkanMemoryAllocator
-        Vulkan::Vulkan Vulkan::UtilityHeaders glm::glm imgui_vulkan stb_image tinygltf
+        Vulkan::volk Vulkan::Headers Vulkan::UtilityHeaders glm::glm imgui_vulkan stb_image tinygltf
         slang::slang
     )
 
@@ -176,6 +176,7 @@ target_compile_options(VulkanFramework PRIVATE
 
 target_compile_definitions(VulkanFramework PRIVATE
     $<$<CONFIG:Debug>:VDEBUG>
+    VK_NO_PROTOTYPES
 )
 
 

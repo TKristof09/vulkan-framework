@@ -559,6 +559,46 @@ void Shader::SetParameter(uint32_t frameIndex, std::string_view name, const Buff
     }
 }
 
+void Shader::SetParameter(uint32_t frameIndex, std::string_view name, const Raytracing::TLAS& tlas)
+{
+    auto it = m_bindings.find(name);
+    if(it == m_bindings.end())
+    {
+        Log::Warn("Shader parameter {} not found in shader {}", name, m_name);
+        return;
+    }
+
+    auto binding = it->second;
+
+    if(binding.isPushConstant)
+    {
+        Log::Error("Push constants can't contain TLASes");
+    }
+    else
+    {
+        if(binding.type != VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR)
+        {
+            Log::Warn("Trying to update binding {}, but it is not an acceleration structure", name);
+            return;
+        }
+
+        VkWriteDescriptorSetAccelerationStructureKHR descriptorAccelerationStructureInfo{};
+        descriptorAccelerationStructureInfo.sType                      = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
+        descriptorAccelerationStructureInfo.accelerationStructureCount = 1;
+        descriptorAccelerationStructureInfo.pAccelerationStructures    = &tlas.handle;
+
+        VkWriteDescriptorSet descriptorWrite{};
+        descriptorWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrite.descriptorCount = 1;
+        descriptorWrite.dstBinding      = binding.binding;
+        descriptorWrite.dstSet          = m_descriptorSets[frameIndex][binding.set];
+        descriptorWrite.descriptorType  = binding.type;
+        descriptorWrite.pNext           = &descriptorAccelerationStructureInfo;
+
+        vkUpdateDescriptorSets(VulkanContext::GetDevice(), 1, &descriptorWrite, 0, nullptr);
+    }
+}
+
 // Maps a SlangStage enum to the corresponding Vulkan shader stage flags.
 VkShaderStageFlags SlangStageToVulkan(SlangStage stage)
 {

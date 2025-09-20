@@ -12,10 +12,14 @@
 
 #include <glm/glm.hpp>
 
+#define IMGUI_IMPL_VULKAN_USE_VOLK
 #include <imgui.h>
 #include <backends/imgui_impl_vulkan.h>
 #include <backends/imgui_impl_glfw.h>
 #include <array>
+
+#define VOLK_IMPLEMENTATION
+#include <volk.h>
 
 
 VkBool32 debugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageTypes, VkDebugUtilsMessengerCallbackDataEXT const* pCallbackData, void* /*pUserData*/);
@@ -42,13 +46,18 @@ Renderer::Renderer(const std::shared_ptr<Window>& window) : m_window(window)
     CreateInstance();
     CreateDevice();
 
+    VmaVulkanFunctions vmaVulkanFunctions{};
+    vmaVulkanFunctions.vkGetInstanceProcAddr = vkGetInstanceProcAddr;
+    vmaVulkanFunctions.vkGetDeviceProcAddr   = vkGetDeviceProcAddr;
+
     VmaAllocatorCreateInfo allocatorInfo = {};
     allocatorInfo.physicalDevice         = VulkanContext::GetPhysicalDevice();
     allocatorInfo.device                 = VulkanContext::GetDevice();
     allocatorInfo.instance               = VulkanContext::GetInstance();
     allocatorInfo.vulkanApiVersion       = VK_API_VERSION_1_3;
+    allocatorInfo.pVulkanFunctions       = &vmaVulkanFunctions;
+    allocatorInfo.flags                  = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
     VK_CHECK(vmaCreateAllocator(&allocatorInfo, &VulkanContext::m_vmaAllocator), "Failed to create vma allocator");
-    allocatorInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
 
     CreateCommandPool();
     CreateDescriptorPool();
@@ -111,7 +120,7 @@ Renderer::~Renderer()
     vkDestroyDevice(VulkanContext::GetDevice(), nullptr);
 
 #ifdef VDEBUG
-    VulkanContext::DestroyDebugUtilsMessengerEXT(VulkanContext::GetInstance(), VulkanContext::m_messenger, nullptr);
+    vkDestroyDebugUtilsMessengerEXT(VulkanContext::GetInstance(), VulkanContext::m_messenger, nullptr);
 #endif
 
     vkDestroyInstance(VulkanContext::GetInstance(), nullptr);
@@ -119,6 +128,8 @@ Renderer::~Renderer()
 
 void Renderer::CreateInstance()
 {
+    VK_CHECK(volkInitialize(), "VOLK failed to initialize");
+
     VkApplicationInfo appinfo = {};
     appinfo.sType             = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     appinfo.pApplicationName  = "VukanApplication";
@@ -132,46 +143,6 @@ void Renderer::CreateInstance()
     createInfo.ppEnabledExtensionNames = extensions.data();
     createInfo.enabledExtensionCount   = static_cast<uint32_t>(extensions.size());
 
-    Log::Info("Requested extensions");
-    for(auto ext : extensions)
-    {
-        Log::Info("    {}", ext);
-    }
-
-
-    // The VK_LAYER_KHRONOS_validation contains all current validation functionality.
-    const char* validationLayerName = "VK_LAYER_KHRONOS_validation";
-    // Check if this layer is available at instance level
-
-    createInfo.ppEnabledLayerNames = &validationLayerName;
-    createInfo.enabledLayerCount   = 1;
-
-
-    VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo = {};
-    debugCreateInfo.sType                              = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-    debugCreateInfo.messageSeverity                    = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-    debugCreateInfo.messageType                        = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
-    debugCreateInfo.pfnUserCallback                    = debugUtilsMessengerCallback;
-
-#ifdef VDEBUG
-    createInfo.pNext = &debugCreateInfo;
-#endif
-
-    VK_CHECK(vkCreateInstance(&createInfo, nullptr, &VulkanContext::m_instance), "Failed to create instance");
-
-    VK_CHECK(glfwCreateWindowSurface(VulkanContext::m_instance, Application::GetInstance()->GetWindow()->GetWindow(), nullptr, &m_surface), "Failed to create window surface!");
-
-
-#ifdef VDEBUG
-    VkDebugUtilsMessengerCreateInfoEXT dcreateInfo = {};
-    dcreateInfo.sType                              = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-    dcreateInfo.messageSeverity                    = /*VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |*/ VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-    dcreateInfo.messageType                        = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
-    dcreateInfo.pfnUserCallback                    = debugUtilsMessengerCallback;
-
-    VulkanContext::CreateDebugUtilsMessengerEXT(VulkanContext::GetInstance(), &dcreateInfo, nullptr, &VulkanContext::m_messenger);
-#endif
-
 
     uint32_t extCount = 0;
     vkEnumerateInstanceExtensionProperties(nullptr, &extCount, nullptr);
@@ -183,6 +154,62 @@ void Renderer::CreateInstance()
     {
         Log::Info("     {}", ext.extensionName);
     }
+
+    Log::Info("Requested extensions");
+    for(auto ext : extensions)
+    {
+        Log::Info("    {}", ext);
+    }
+
+    const char* envVar              = std::getenv("DISABLE_VALIDATION");
+    bool enableValidation           = (envVar == nullptr);
+    // The VK_LAYER_KHRONOS_validation contains all current validation functionality.
+    const char* validationLayerName = "VK_LAYER_KHRONOS_validation";
+    // Check if this layer is available at instance level
+
+    if(enableValidation)
+    {
+        createInfo.ppEnabledLayerNames = &validationLayerName;
+        createInfo.enabledLayerCount   = 1;
+    }
+
+
+    VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo = {};
+    debugCreateInfo.sType                              = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+    debugCreateInfo.messageSeverity                    = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+    debugCreateInfo.messageType                        = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+    debugCreateInfo.pfnUserCallback                    = debugUtilsMessengerCallback;
+
+    uint32_t layerCount = 0;
+    vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+    std::vector<VkLayerProperties> actual_layers(layerCount);
+    vkEnumerateInstanceLayerProperties(&layerCount, actual_layers.data());
+    Log::Info("Layers");
+    for(auto layer : actual_layers)
+    {
+        Log::Info("    {}", layer.layerName);
+    }
+#ifdef VDEBUG
+    createInfo.pNext = &debugCreateInfo;
+#endif
+
+    VK_CHECK(vkCreateInstance(&createInfo, nullptr, &VulkanContext::m_instance), "Failed to create instance");
+
+    volkLoadInstance(VulkanContext::GetInstance());
+
+
+    VK_CHECK(glfwCreateWindowSurface(VulkanContext::m_instance, Application::GetInstance()->GetWindow()->GetWindow(), nullptr, &m_surface), "Failed to create window surface!");
+
+
+#ifdef VDEBUG
+    VkDebugUtilsMessengerCreateInfoEXT dcreateInfo = {};
+    dcreateInfo.sType                              = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+    dcreateInfo.messageSeverity                    = /*VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |*/ VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+    dcreateInfo.messageType                        = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+    dcreateInfo.pfnUserCallback                    = debugUtilsMessengerCallback;
+
+    vkCreateDebugUtilsMessengerEXT(VulkanContext::GetInstance(), &dcreateInfo, nullptr, &VulkanContext::m_messenger);
+#endif
 }
 
 void Renderer::CreateDevice()
@@ -192,6 +219,10 @@ void Renderer::CreateDevice()
 #ifdef VDEBUG
     deviceExtensions.push_back(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME);
 #endif
+
+    deviceExtensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+    deviceExtensions.push_back(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+    deviceExtensions.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
 
     uint32_t deviceCount = 0;
     vkEnumeratePhysicalDevices(VulkanContext::GetInstance(), &deviceCount, nullptr);
@@ -275,6 +306,14 @@ void Renderer::CreateDevice()
     device13Features.maintenance4                     = VK_TRUE;  // need it because the spirv compiler uses localsizeid even though it doesnt need to for now, but i might switch to spec constants in the future anyway
     device13Features.synchronization2                 = VK_TRUE;
 
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures{};
+    accelerationStructureFeatures.sType                 = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+    accelerationStructureFeatures.accelerationStructure = VK_TRUE;
+
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR raytracingFeatures{};
+    raytracingFeatures.sType              = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+    raytracingFeatures.rayTracingPipeline = true;
+
 
     VkDeviceCreateInfo createInfo      = {};
     createInfo.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -284,13 +323,17 @@ void Renderer::CreateDevice()
     createInfo.pQueueCreateInfos       = queueCreateInfos.data();
     createInfo.queueCreateInfoCount    = static_cast<uint32_t>(queueCreateInfos.size());
 
-    createInfo.pNext       = &device11Features;
-    device11Features.pNext = &device12Features;
-    device12Features.pNext = &device13Features;
+    createInfo.pNext                    = &device11Features;
+    device11Features.pNext              = &device12Features;
+    device12Features.pNext              = &device13Features;
+    device13Features.pNext              = &accelerationStructureFeatures;
+    accelerationStructureFeatures.pNext = &raytracingFeatures;
 
     VK_CHECK(vkCreateDevice(VulkanContext::GetPhysicalDevice(), &createInfo, nullptr, &VulkanContext::m_device), "Failed to create device");
     vkGetDeviceQueue(VulkanContext::GetDevice(), queueFamilyIndex, 0, &VulkanContext::m_queue);
     VulkanContext::m_queueIndex = queueFamilyIndex;
+
+    volkLoadDevice(VulkanContext::GetDevice());
 }
 
 void Renderer::CreateSwapchain()
@@ -437,7 +480,7 @@ void Renderer::CreateSyncObjects()
 
 void Renderer::CreateDescriptorPool()
 {
-    std::array<VkDescriptorPoolSize, 5> poolSizes = {};
+    std::array<VkDescriptorPoolSize, 6> poolSizes = {};
     poolSizes[0].type                             = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     poolSizes[0].descriptorCount                  = NUM_DESCRIPTORS;
     poolSizes[1].type                             = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
@@ -448,6 +491,8 @@ void Renderer::CreateDescriptorPool()
     poolSizes[3].descriptorCount                  = NUM_DESCRIPTORS;
     poolSizes[4].type                             = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSizes[4].descriptorCount                  = NUM_DESCRIPTORS;
+    poolSizes[5].type                             = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    poolSizes[5].descriptorCount                  = 10;
 
 
     VkDescriptorPoolCreateInfo createInfo = {};

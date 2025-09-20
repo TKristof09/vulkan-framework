@@ -3,20 +3,22 @@
 #include "CommandBuffer.hpp"
 #include "VulkanContext.hpp"
 #include "Shader.hpp"
-#include <vulkan/vulkan.h>
+#include <volk.h>
 #include <optional>
 
 
 enum class PipelineType
 {
     GRAPHICS,
-    COMPUTE
+    COMPUTE,
+    RAYTRACING
 };
 
 class Pipeline;
 struct PipelineCreateInfo
 {
     PipelineType type;
+    std::vector<std::shared_ptr<Shader>> shaders;
 
     bool allowDerivatives = false;
     Pipeline* parent      = nullptr;
@@ -37,7 +39,6 @@ struct PipelineCreateInfo
     VkFormat depthFormat   = VK_FORMAT_D32_SFLOAT;
     VkFormat stencilFormat = VK_FORMAT_S8_UINT;  // TODO look into stencil stuff
 
-    VkShaderStageFlags stages = 0;
     VkExtent2D viewportExtent = {};
 
     VkSampleCountFlagBits msaaSamples = VK_SAMPLE_COUNT_1_BIT;
@@ -52,6 +53,13 @@ struct PipelineCreateInfo
     bool isGlobal = false;
 };
 
+struct SBT
+{
+    VkStridedDeviceAddressRegionKHR raygen;
+    VkStridedDeviceAddressRegionKHR miss;
+    VkStridedDeviceAddressRegionKHR closestHit;
+    VkStridedDeviceAddressRegionKHR callable;
+};
 
 class Pipeline
 {
@@ -94,7 +102,9 @@ public:
 
     void Bind(CommandBuffer& cb, uint32_t frameIndex) const;
     [[nodiscard]] uint32_t GetViewMask() const { return m_createInfo.viewMask; }
-    Shader& GetShader(uint32_t idx) { return m_shaders[idx]; }
+    std::shared_ptr<Shader> GetShader(uint32_t idx) { return m_shaders[idx]; }
+
+    SBT GetSBT() const { return m_sbt; }
 
 
 private:
@@ -107,6 +117,7 @@ private:
 
     void CreateGraphicsPipeline();
     void CreateComputePipeline();
+    void CreateRaytracingPipeline();
 
     [[nodiscard]] inline VkPipelineBindPoint GetBindPoint() const
     {
@@ -124,7 +135,7 @@ private:
 
     std::string m_name;
     PipelineCreateInfo m_createInfo;
-    std::vector<Shader> m_shaders;
+    std::vector<std::shared_ptr<Shader>> m_shaders;
 
 
     VkPipeline m_pipeline;
@@ -135,5 +146,6 @@ private:
     std::vector<VkVertexInputAttributeDescription> m_vertexInputAttributes;
     std::optional<VkVertexInputBindingDescription> m_vertexInputBinding;  // only support one for now
 
-    std::vector<uint64_t> m_shaderDataSlots;
+    SBT m_sbt;
+    Buffer m_sbtBuffer;
 };

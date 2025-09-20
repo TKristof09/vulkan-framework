@@ -2,6 +2,7 @@
 #include "Buffer.hpp"
 #include "DescriptorSet.hpp"
 #include "Image.hpp"
+#include "Raytracing.hpp"
 #include "VulkanContext.hpp"
 #include "slang.h"
 #include <cstring>
@@ -15,7 +16,7 @@ class Pipeline;
 template<typename T, typename... U>
 concept IsAnyOf = (std::same_as<T, U> || ...);
 template<typename T>
-concept IsSimpleParameter = !IsAnyOf<std::remove_cvref_t<std::remove_pointer_t<std::decay_t<T>>>, Buffer, Image>;
+concept IsSimpleParameter = !IsAnyOf<std::remove_cvref_t<std::remove_pointer_t<std::decay_t<T>>>, Buffer, Image, Raytracing::TLAS>;
 
 class Shader
 {
@@ -99,6 +100,7 @@ public:
 
     void SetParameter(uint32_t frameIndex, std::string_view name, const Image* image);
     void SetParameter(uint32_t frameIndex, std::string_view name, const Buffer* buffer);
+    void SetParameter(uint32_t frameIndex, std::string_view name, const Raytracing::TLAS& tlas);
 
     template<typename T>
         requires(IsSimpleParameter<T>)
