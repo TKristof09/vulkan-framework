@@ -299,6 +299,7 @@ void Renderer::CreateDevice()
     device12Features.descriptorBindingStorageImageUpdateAfterBind = VK_TRUE;
     device12Features.bufferDeviceAddress                          = VK_TRUE;
     device12Features.drawIndirectCount                            = VK_TRUE;
+    device12Features.scalarBlockLayout                            = VK_TRUE;
 
     VkPhysicalDeviceVulkan13Features device13Features = {};
     device13Features.sType                            = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
@@ -314,6 +315,19 @@ void Renderer::CreateDevice()
     raytracingFeatures.sType              = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
     raytracingFeatures.rayTracingPipeline = true;
 
+#ifdef VDEBUG
+    VkPhysicalDeviceRayTracingValidationFeaturesNV validationFeatures = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_VALIDATION_FEATURES_NV};
+    VkPhysicalDeviceFeatures2 features                                = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+    features.pNext                                                    = &validationFeatures;
+    vkGetPhysicalDeviceFeatures2(VulkanContext::GetPhysicalDevice(), &features);
+
+    bool rayTracingValidationAvailable = validationFeatures.rayTracingValidation;
+
+    VkPhysicalDeviceRayTracingValidationFeaturesNV raytracingValidation{};
+    raytracingValidation.sType                = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_VALIDATION_FEATURES_NV;
+    raytracingValidation.rayTracingValidation = true;
+#endif
+
 
     VkDeviceCreateInfo createInfo      = {};
     createInfo.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -328,6 +342,14 @@ void Renderer::CreateDevice()
     device12Features.pNext              = &device13Features;
     device13Features.pNext              = &accelerationStructureFeatures;
     accelerationStructureFeatures.pNext = &raytracingFeatures;
+#ifdef VDEBUG
+    const char* envVar    = std::getenv("DISABLE_VALIDATION");
+    bool enableValidation = (envVar == nullptr);
+    if(rayTracingValidationAvailable && enableValidation)
+    {
+        raytracingFeatures.pNext = &raytracingValidation;
+    }
+#endif
 
     VK_CHECK(vkCreateDevice(VulkanContext::GetPhysicalDevice(), &createInfo, nullptr, &VulkanContext::m_device), "Failed to create device");
     vkGetDeviceQueue(VulkanContext::GetDevice(), queueFamilyIndex, 0, &VulkanContext::m_queue);

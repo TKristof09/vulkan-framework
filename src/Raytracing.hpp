@@ -7,12 +7,13 @@ namespace Raytracing
 {
 struct BLAS
 {
-    VkAccelerationStructureKHR handle = VK_NULL_HANDLE;
+    std::vector<VkAccelerationStructureKHR> handles;
     Buffer buffer;
 
     void Destroy()
     {
-        vkDestroyAccelerationStructureKHR(VulkanContext::GetDevice(), handle, nullptr);
+        for(auto handle : handles)
+            vkDestroyAccelerationStructureKHR(VulkanContext::GetDevice(), handle, nullptr);
     }
 };
 struct TLAS
@@ -30,5 +31,5 @@ struct TLAS
 // per mesh inside the model, then 1 TLAS containing a bunch of BLASes. But for
 // now this should be fine for small scenes
 BLAS CreateBLAS(const Model& model);
-TLAS CreateTLAS(const BLAS& blas);
+TLAS CreateTLAS(const BLAS& blas, const Model& model);
 };

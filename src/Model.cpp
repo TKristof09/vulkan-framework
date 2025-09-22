@@ -104,7 +104,7 @@ Model::Model(std::filesystem::path p)
             if(node.scale.size() > 0)
                 scale = {node.scale[0], node.scale[1], node.scale[2]};
             if(node.rotation.size() > 0)
-                rotation = {static_cast<float>(node.rotation[0]), static_cast<float>(node.rotation[1]), static_cast<float>(node.rotation[2]), static_cast<float>(node.rotation[3])};
+                rotation = {static_cast<float>(node.rotation[3]), static_cast<float>(node.rotation[0]), static_cast<float>(node.rotation[1]), static_cast<float>(node.rotation[2])};
 
             outMesh.transform = glm::translate(glm::mat4(1.0f), position)
                               * glm::toMat4(rotation)
@@ -128,6 +128,16 @@ Model::Model(std::filesystem::path p)
                 {
                     const auto& s                 = gm.values.at("metallicFactor").Factor();
                     outPrim.material.metallicness = s;
+                }
+                outPrim.material.emissiveColor = glm::vec3{gm.emissiveFactor[0], gm.emissiveFactor[1], gm.emissiveFactor[2]};
+
+                if(gm.extensions.find("KHR_materials_emissive_strength") != gm.extensions.end())
+                {
+                    const tinygltf::Value& extVal = gm.extensions.at("KHR_materials_emissive_strength");
+                    if(extVal.Has("emissiveStrength"))
+                    {
+                        outPrim.material.emissiveStrength = static_cast<float>(extVal.Get("emissiveStrength").Get<double>());
+                    }
                 }
             }
 
@@ -205,6 +215,11 @@ Model::Model(std::filesystem::path p)
 
     stagingVertexBuffer.Copy(&m_vertexBuffer);
     stagingIndexBuffer.Copy(&m_indexBuffer);
+
+    auto nameVertex = p.filename().string() + "_vertex";
+    VK_SET_DEBUG_NAME(m_vertexBuffer.GetVkBuffer(), VK_OBJECT_TYPE_BUFFER, nameVertex.c_str());
+    auto nameIndex = p.filename().string() + "_index";
+    VK_SET_DEBUG_NAME(m_indexBuffer.GetVkBuffer(), VK_OBJECT_TYPE_BUFFER, nameIndex.c_str());
 }
 
 int NumComponents(int type)
