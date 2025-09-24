@@ -115,7 +115,7 @@ Model::Model(std::filesystem::path p)
         outMesh.primitives.reserve(mesh.primitives.size());
         for(const auto& prim : mesh.primitives)
         {
-            Primitive outPrim{};
+            Primitive outPrim;
             if(prim.material >= 0)
             {
                 const tinygltf::Material& gm = gltf.materials[prim.material];
@@ -129,6 +129,13 @@ Model::Model(std::filesystem::path p)
                     const auto& s                 = gm.values.at("metallicFactor").Factor();
                     outPrim.material.metallicness = s;
                 }
+
+                if(gm.values.find("roughnessFactor") != gm.values.end())
+                {
+                    const auto& s              = gm.values.at("roughnessFactor").Factor();
+                    outPrim.material.roughness = s;
+                }
+
                 outPrim.material.emissiveColor = glm::vec3{gm.emissiveFactor[0], gm.emissiveFactor[1], gm.emissiveFactor[2]};
 
                 if(gm.extensions.find("KHR_materials_emissive_strength") != gm.extensions.end())
@@ -137,6 +144,15 @@ Model::Model(std::filesystem::path p)
                     if(extVal.Has("emissiveStrength"))
                     {
                         outPrim.material.emissiveStrength = static_cast<float>(extVal.Get("emissiveStrength").Get<double>());
+                    }
+                }
+
+                if(gm.extensions.find("KHR_materials_ior") != gm.extensions.end())
+                {
+                    const tinygltf::Value& extVal = gm.extensions.at("KHR_materials_ior");
+                    if(extVal.Has("ior"))
+                    {
+                        outPrim.material.ior = static_cast<float>(extVal.Get("ior").Get<double>());
                     }
                 }
             }

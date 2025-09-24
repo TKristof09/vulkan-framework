@@ -2,6 +2,7 @@
 #include "Image.hpp"
 #include "VulkanContext.hpp"
 #include "CommandBuffer.hpp"
+#include <cstring>
 #include <vk_mem_alloc.h>
 
 
@@ -75,6 +76,19 @@ public:
         info.buffer                    = m_buffer;
 
         return vkGetBufferDeviceAddress(VulkanContext::GetDevice(), &info);
+    }
+    template<typename T>
+    std::vector<T> Read()
+    {
+        if(!m_mappedMemory)
+        {
+            Log::Error("Can't read non mappable buffer");
+            return {};
+        }
+        vmaInvalidateAllocation(VulkanContext::GetVmaAllocator(), m_allocation, 0, m_size);
+        std::vector<T> res(m_size / sizeof(T));
+        std::memcpy(res.data(), (void*)((uint8_t*)m_mappedMemory), (size_t)res.size() * sizeof(T));
+        return res;
     }
 
     VkBufferMemoryBarrier2 GetBarrier(VkPipelineStageFlags2 srcStage, VkAccessFlagBits2 srcAccess, VkPipelineStageFlags2 dstStage, VkAccessFlagBits2 dstAccess);

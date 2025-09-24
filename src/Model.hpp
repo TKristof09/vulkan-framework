@@ -10,10 +10,15 @@ class Model
 public:
     struct Material
     {
-        glm::vec4 baseColor;
-        float metallicness;
-        glm::vec3 emissiveColor;
-        float emissiveStrength;
+        glm::vec4 baseColor = glm::vec4(0.0);
+
+        float metallicness = 0.0;
+        float roughness    = 1.0;
+
+        float ior = 1.5;
+
+        glm::vec3 emissiveColor = glm::vec4(0.0);
+        float emissiveStrength  = 0.0f;
     };
     struct Primitive
     {
