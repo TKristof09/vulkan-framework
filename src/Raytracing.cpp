@@ -189,6 +189,7 @@ TLAS CreateTLAS(const BLAS& blas, const Model& model)
 {
     TLAS tlas;
     std::vector<VkAccelerationStructureInstanceKHR> instances{};
+    uint32_t currentOffset = 0;
     for(size_t i = 0; i < blas.handles.size(); i++)
     {
         VkAccelerationStructureDeviceAddressInfoKHR accelerationDeviceAddressInfo{};
@@ -198,12 +199,14 @@ TLAS CreateTLAS(const BLAS& blas, const Model& model)
 
         VkAccelerationStructureInstanceKHR instance{};
         instance.transform                              = ToVkTransform(model.GetMeshes()[i].transform);
-        instance.instanceCustomIndex                    = 0;
+        instance.instanceCustomIndex                    = currentOffset;
         instance.mask                                   = 0xFF;
         instance.instanceShaderBindingTableRecordOffset = 0;
         instance.flags                                  = 0;
         instance.accelerationStructureReference         = deviceAddress;
         instances.push_back(instance);
+
+        currentOffset += model.GetMeshes()[i].primitives.size();
     }
 
     Buffer instancesBuffer(instances.size() * sizeof(VkAccelerationStructureInstanceKHR), VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, true);
@@ -231,7 +234,7 @@ TLAS CreateTLAS(const BLAS& blas, const Model& model)
     accelerationStructureBuildGeometryInfo.geometryCount = 1;
     accelerationStructureBuildGeometryInfo.pGeometries   = &accelerationStructureGeometry;
 
-    uint32_t primitive_count = 1;
+    uint32_t primitiveCount = instances.size();
 
     VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo{};
     accelerationStructureBuildSizesInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
@@ -239,7 +242,7 @@ TLAS CreateTLAS(const BLAS& blas, const Model& model)
         VulkanContext::GetDevice(),
         VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
         &accelerationStructureBuildGeometryInfo,
-        &primitive_count,
+        &primitiveCount,
         &accelerationStructureBuildSizesInfo);
 
 
@@ -266,7 +269,7 @@ TLAS CreateTLAS(const BLAS& blas, const Model& model)
     accelerationStructureBuildGeometryInfo.scratchData.deviceAddress = scratchBuffer.GetDeviceAddress();
 
     VkAccelerationStructureBuildRangeInfoKHR accelerationStructureBuildRangeInfo{};
-    accelerationStructureBuildRangeInfo.primitiveCount                      = 1;
+    accelerationStructureBuildRangeInfo.primitiveCount                      = primitiveCount;
     accelerationStructureBuildRangeInfo.primitiveOffset                     = 0;
     accelerationStructureBuildRangeInfo.firstVertex                         = 0;
     accelerationStructureBuildRangeInfo.transformOffset                     = 0;
