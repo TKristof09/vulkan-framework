@@ -146,6 +146,10 @@ Model::Model(std::filesystem::path p)
                         outPrim.material.emissiveStrength = static_cast<float>(extVal.Get("emissiveStrength").Get<double>());
                     }
                 }
+                else
+                {
+                    outPrim.material.emissiveStrength = 0.0f;  // spec states default value is 1 but it should be 0 if no extension i think
+                }
 
                 if(gm.extensions.find("KHR_materials_ior") != gm.extensions.end())
                 {
@@ -153,6 +157,28 @@ Model::Model(std::filesystem::path p)
                     if(extVal.Has("ior"))
                     {
                         outPrim.material.ior = static_cast<float>(extVal.Get("ior").Get<double>());
+                    }
+                }
+
+
+                if(gm.extensions.find("KHR_materials_transmission") != gm.extensions.end())
+                {
+                    const tinygltf::Value& extVal = gm.extensions.at("KHR_materials_transmission");
+                    if(extVal.Has("transmissionFactor"))
+                    {
+                        outPrim.material.transmission = static_cast<float>(extVal.Get("transmissionFactor").Get<double>());
+                    }
+                }
+
+                if(gm.extensions.find("KHR_materials_specular") != gm.extensions.end())
+                {
+                    const tinygltf::Value& extVal = gm.extensions.at("KHR_materials_specular");
+                    if(extVal.Has("specularColorFactor"))
+                    {
+                        auto ext                        = extVal.Get("specularColorFactor");
+                        outPrim.material.specularTint.r = ext.Get(0).GetNumberAsDouble();
+                        outPrim.material.specularTint.g = ext.Get(1).GetNumberAsDouble();
+                        outPrim.material.specularTint.b = ext.Get(2).GetNumberAsDouble();
                     }
                 }
             }
