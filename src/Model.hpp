@@ -5,6 +5,31 @@
 #include <vector>
 #include <span>
 
+struct Camera
+{
+    struct Perspective
+    {
+        float fovy;
+        float aspect;
+        float znear;
+        float zfar;
+    };
+    struct Orthographic
+    {
+        float left;
+        float right;
+        float bottom;
+        float top;
+    };
+    glm::mat4 view;
+    glm::mat4 proj;
+    bool isPerspective;
+    union
+    {
+        Perspective perspective;
+        Orthographic orthographic;
+    };
+};
 class Model
 {
 public:
@@ -46,10 +71,12 @@ public:
     const Buffer& GetIndexBuffer() const { return m_indexBuffer; }
 
     const std::span<const Mesh> GetMeshes() const { return std::span(m_meshes); }
+    const std::optional<Camera> GetCamera() const { return m_camera; }
 
 
 private:
     std::vector<Mesh> m_meshes;
+    std::optional<Camera> m_camera;
     Buffer m_vertexBuffer;
     Buffer m_indexBuffer;
 };

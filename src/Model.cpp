@@ -78,11 +78,71 @@ Model::Model(std::filesystem::path p)
 
     for(const auto& node : gltf.nodes)
     {
+        if(node.camera == 0)
+        {
+            Camera camera;
+            auto matrix = node.matrix;
+            glm::mat4 transform;
+            if(matrix.size() > 0)
+            {
+                glm::mat4 mat(
+                    static_cast<float>(matrix[0]), static_cast<float>(matrix[4]), static_cast<float>(matrix[8]), static_cast<float>(matrix[12]),
+                    static_cast<float>(matrix[1]), static_cast<float>(matrix[5]), static_cast<float>(matrix[9]), static_cast<float>(matrix[13]),
+                    static_cast<float>(matrix[2]), static_cast<float>(matrix[6]), static_cast<float>(matrix[10]), static_cast<float>(matrix[14]),
+                    static_cast<float>(matrix[3]), static_cast<float>(matrix[7]), static_cast<float>(matrix[11]), static_cast<float>(matrix[15]));
+                transform = mat;
+            }
+            else
+            {
+                glm::vec3 position(0.0f);
+                glm::vec3 scale(1.0f);
+                glm::quat rotation(1.0f, 0.0f, 0.0f, 0.0f);
+                if(node.translation.size() > 0)
+                    position = {node.translation[0], node.translation[1], node.translation[2]};
+                if(node.scale.size() > 0)
+                    scale = {node.scale[0], node.scale[1], node.scale[2]};
+                if(node.rotation.size() > 0)
+                    rotation = {static_cast<float>(node.rotation[3]), static_cast<float>(node.rotation[0]), static_cast<float>(node.rotation[1]), static_cast<float>(node.rotation[2])};
+
+                transform = glm::translate(glm::mat4(1.0f), position)
+                          * glm::toMat4(rotation)
+                          * glm::scale(glm::mat4(1.0f), scale);
+            }
+            camera.view = glm::inverse(transform);
+
+            if(gltf.cameras[0].type == "perspective")
+            {
+                auto cam = gltf.cameras[0].perspective;
+
+                camera.perspective.fovy   = cam.yfov;
+                camera.perspective.aspect = cam.aspectRatio;
+                camera.perspective.znear  = cam.znear;
+                camera.perspective.zfar   = cam.zfar;
+                camera.proj               = glm::perspective(cam.yfov, cam.aspectRatio, cam.znear, cam.zfar);
+
+                camera.isPerspective = true;
+            }
+            else
+            {
+                auto cam                   = gltf.cameras[0].orthographic;
+                camera.orthographic.left   = -cam.xmag;
+                camera.orthographic.right  = cam.xmag;
+                camera.orthographic.bottom = -cam.ymag;
+                camera.orthographic.top    = cam.ymag;
+                camera.proj                = glm::ortho(camera.orthographic.left, camera.orthographic.right, camera.orthographic.bottom, camera.orthographic.top, static_cast<float>(cam.znear), static_cast<float>(cam.zfar));
+
+                camera.isPerspective = false;
+            }
+
+            camera.proj[1][1] *= -1.0f;  // invert Y for vulkan stuff
+            m_camera           = camera;
+        }
         if(node.mesh == -1)
             continue;
 
         assert(node.children.size() == 0);
         Mesh outMesh{};
+
 
         auto matrix = node.matrix;
         if(matrix.size() > 0)
