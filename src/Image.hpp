@@ -33,7 +33,7 @@ public:
     Image(uint32_t width, uint32_t height, ImageCreateInfo createInfo);
     Image(VkExtent2D extent, ImageCreateInfo createInfo);
     Image(std::pair<uint32_t, uint32_t> widthHeight, ImageCreateInfo createInfo);
-    static Image FromFile(std::filesystem::path path, bool srgb = true);
+    static Image FromFile(std::filesystem::path path, VkFormat format = VK_FORMAT_R8G8B8A8_SRGB);
     static Image CubemapFromFile(std::filesystem::path dirPath);
 
     Image(const Image& other) = delete;
@@ -95,6 +95,9 @@ public:
     uint32_t GetMipLevels() const { return m_mipLevels; }
     uint32_t GetWidth() const { return m_width; }
     uint32_t GetHeight() const { return m_height; }
+
+    uint32_t GetBytesPerPixel() const;
+    uint64_t GetMemorySize() const;
 
     VkImageMemoryBarrier2 GetBarrier(VkImageLayout oldLayout, VkImageLayout newLayout, VkPipelineStageFlags2 srcStage, VkAccessFlagBits2 srcAccess, VkPipelineStageFlags2 dstStage, VkAccessFlagBits2 dstAccess);
 

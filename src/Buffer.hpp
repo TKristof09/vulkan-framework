@@ -19,6 +19,13 @@ public:
     };
     Buffer();
     Buffer(VkDeviceSize size, VkBufferUsageFlags usage, bool mappable = false);
+    template<typename T>
+    Buffer(const std::vector<T>& data, VkBufferUsageFlags usage)
+    {
+        Allocate(data.size() * sizeof(T), usage, true);
+        Fill(data);
+    }
+
     ~Buffer();
     Buffer(const Buffer& other) = delete;
 

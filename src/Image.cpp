@@ -114,12 +114,20 @@ Image::Image(VkExtent2D extent, ImageCreateInfo createInfo) : Image(extent.width
 Image::Image(std::pair<uint32_t, uint32_t> widthHeight, ImageCreateInfo createInfo) : Image(widthHeight.first, widthHeight.second, createInfo)
 {
 }
-
-Image Image::FromFile(std::filesystem::path path, bool srgb)
+Image Image::FromFile(std::filesystem::path path, VkFormat format)
 {
     int width, height, channels;
 
-    stbi_uc* pixels = stbi_load(std::filesystem::absolute(path).string().c_str(), &width, &height, &channels, STBI_rgb_alpha);
+    void* pixels = nullptr;
+
+    if(vkuFormatIsSFLOAT(format) || vkuFormatIsUFLOAT(format))
+    {
+        pixels = stbi_loadf(std::filesystem::absolute(path).string().c_str(), &width, &height, &channels, STBI_rgb_alpha);
+    }
+    else
+    {
+        pixels = stbi_load(std::filesystem::absolute(path).string().c_str(), &width, &height, &channels, STBI_rgb_alpha);
+    }
 
     if(channels != 4)
         Log::Warn("Texture {} has {} channels, but is loaded with 4 channels", path.filename().string(), channels);
@@ -128,7 +136,7 @@ Image Image::FromFile(std::filesystem::path path, bool srgb)
 
 
     ImageCreateInfo imageCI = {};
-    imageCI.format          = srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+    imageCI.format          = format;
     imageCI.usage           = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     imageCI.aspectFlags     = VK_IMAGE_ASPECT_COLOR_BIT;
     imageCI.debugName       = path.filename().string();
@@ -136,16 +144,15 @@ Image Image::FromFile(std::filesystem::path path, bool srgb)
 
     Image texture(width, height, imageCI);
 
-    VkDeviceSize imageSize = width * height * 4;  // 8 bit per channel, 4 channels
-    Buffer stagingBuffer(imageSize,
+    Buffer stagingBuffer(texture.GetMemorySize(),
                          VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                          true);
 
-    stagingBuffer.Fill(pixels, imageSize);
+    stagingBuffer.Fill(pixels, texture.GetMemorySize());
     stbi_image_free(pixels);
 
     texture.TransitionLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-    stagingBuffer.CopyToImage(texture, width, height);
+    stagingBuffer.CopyToImage(texture, width, height, texture.GetBytesPerPixel());
     texture.GenerateMipmaps(VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL);
 
     return texture;
@@ -228,15 +235,14 @@ Image Image::CubemapFromFile(std::filesystem::path dirPath)
 
     Image cubemap(width, height, imageCI);
 
-    VkDeviceSize imageSizeEach = static_cast<VkDeviceSize>(width) * height * 4;
-    VkDeviceSize totalSize     = imageSizeEach * 6;
+    VkDeviceSize totalSize = cubemap.GetMemorySize();
 
     Buffer stagingBuffer(totalSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true);
     stagingBuffer.Fill(combined.data(), totalSize);
 
     cubemap.TransitionLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
-    stagingBuffer.CopyToImage(cubemap, width, height, 4, 6);
+    stagingBuffer.CopyToImage(cubemap, width, height, cubemap.GetBytesPerPixel(), 6);
 
     cubemap.GenerateMipmaps(VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL);
 
@@ -486,4 +492,25 @@ VkImageMemoryBarrier2 Image::GetBarrier(VkImageLayout oldLayout, VkImageLayout n
     barrier.srcStageMask                    = srcStage;
     barrier.dstStageMask                    = dstStage;
     return barrier;
+}
+
+uint32_t Image::GetBytesPerPixel() const
+{
+    uint32_t componentSize = 0;
+
+    const struct VKU_FORMAT_INFO format_info = vkuGetFormatInfo(m_format);
+    for(size_t i = 0; i < VKU_FORMAT_MAX_COMPONENTS; i++)
+    {
+        componentSize += format_info.components[i].size / 8;
+    }
+    return componentSize;
+}
+
+uint64_t Image::GetMemorySize() const
+{
+    uint32_t componentSize = GetBytesPerPixel();
+    if(m_isCubeMap)
+        return m_width * m_height * componentSize * 6;
+    else
+        return m_width * m_height * componentSize;
 }
