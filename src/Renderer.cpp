@@ -223,6 +223,7 @@ void Renderer::CreateDevice()
     deviceExtensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
     deviceExtensions.push_back(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
     deviceExtensions.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+    deviceExtensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
 
     uint32_t deviceCount = 0;
     vkEnumeratePhysicalDevices(VulkanContext::GetInstance(), &deviceCount, nullptr);
@@ -311,9 +312,13 @@ void Renderer::CreateDevice()
     accelerationStructureFeatures.sType                 = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
     accelerationStructureFeatures.accelerationStructure = VK_TRUE;
 
-    VkPhysicalDeviceRayTracingPipelineFeaturesKHR raytracingFeatures{};
-    raytracingFeatures.sType              = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
-    raytracingFeatures.rayTracingPipeline = true;
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rayTracingFeatures{};
+    rayTracingFeatures.sType              = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+    rayTracingFeatures.rayTracingPipeline = true;
+
+    VkPhysicalDeviceRayQueryFeaturesKHR rayQueryFeatures{};
+    rayQueryFeatures.sType    = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+    rayQueryFeatures.rayQuery = true;
 
 #ifdef VDEBUG
     VkPhysicalDeviceRayTracingValidationFeaturesNV validationFeatures = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_VALIDATION_FEATURES_NV};
@@ -341,13 +346,14 @@ void Renderer::CreateDevice()
     device11Features.pNext              = &device12Features;
     device12Features.pNext              = &device13Features;
     device13Features.pNext              = &accelerationStructureFeatures;
-    accelerationStructureFeatures.pNext = &raytracingFeatures;
+    accelerationStructureFeatures.pNext = &rayTracingFeatures;
+    rayTracingFeatures.pNext            = &rayQueryFeatures;
 #ifdef VDEBUG
     const char* envVar    = std::getenv("DISABLE_VALIDATION");
     bool enableValidation = (envVar == nullptr);
     if(rayTracingValidationAvailable && enableValidation)
     {
-        raytracingFeatures.pNext = &raytracingValidation;
+        rayQueryFeatures.pNext = &raytracingValidation;
     }
 #endif
 

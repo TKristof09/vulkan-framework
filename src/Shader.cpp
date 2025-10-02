@@ -96,7 +96,7 @@ bool Shader::Compile(const std::filesystem::path& path, std::string_view entryPo
     slang::SessionDesc sessionDesc = {};
     slang::TargetDesc targetDesc   = {};
     targetDesc.format              = SLANG_SPIRV;
-    targetDesc.profile             = globalSession->findProfile("spirv_1_5");
+    targetDesc.profile             = globalSession->findProfile("spirv_latest");
 
     sessionDesc.targets                 = &targetDesc;
     sessionDesc.targetCount             = 1;
@@ -341,8 +341,9 @@ void Shader::GetLayout(slang::VariableLayoutReflection* vl, std::deque<slang::Va
                 bool isPushConstant     = slot.isPushConstant || bindingType == slang::BindingType::PushConstant;
                 bool isStructuredBuffer = tl->getKind() == slang::TypeReflection::Kind::Resource && tl->getResourceShape() == SlangResourceShape::SLANG_STRUCTURED_BUFFER;
                 uint32_t stride         = tl->getKind() == slang::TypeReflection::Kind::Array ? tl->getElementStride(SLANG_PARAMETER_CATEGORY_UNIFORM) : 0;
+
                 if(isStructuredBuffer)
-                    stride = tl->getElementTypeLayout()->getStride();
+                    stride = tl->getElementTypeLayout()->getStride();  // FIXME: This seems to give wrong values for buffers using ScalarDataLayout
 
                 if(bindingType == slang::BindingType::PushConstant)
                 {
