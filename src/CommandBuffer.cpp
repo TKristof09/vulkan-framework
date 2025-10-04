@@ -61,7 +61,6 @@ void CommandBuffer::End()
 
     VK_CHECK(vkEndCommandBuffer(m_commandBuffer), "Failed to record command buffer!");
     m_recording = false;
-    m_isGlobalDescSetBound.clear();
 }
 
 void CommandBuffer::SubmitIdle()

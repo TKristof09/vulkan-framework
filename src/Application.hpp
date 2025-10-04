@@ -21,6 +21,7 @@ public:
 
     void EnqueueRenderCommand(const std::function<void(CommandBuffer&, Image&, uint32_t, float)>& func);
     std::shared_ptr<Window> GetWindow() const { return m_window; }
+    Renderer* GetRenderer() const { return m_renderer.get(); }
 
 private:
     std::shared_ptr<Window> m_window;

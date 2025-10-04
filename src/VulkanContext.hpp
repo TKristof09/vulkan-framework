@@ -6,7 +6,7 @@
 #include "Log.hpp"
 
 #define NUM_FRAMES_IN_FLIGHT 2
-static constexpr uint32_t NUM_DESCRIPTORS = 1000;
+static constexpr uint32_t NUM_DESCRIPTORS = 10000;
 
 class Pipeline;
 class VulkanContext

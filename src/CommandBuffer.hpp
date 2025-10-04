@@ -55,5 +55,4 @@ private:
     VkCommandBuffer m_commandBuffer;
     VkQueue m_queue;
     VkCommandPool m_commandPool;
-    std::unordered_map<VkPipelineBindPoint, bool> m_isGlobalDescSetBound;
 };

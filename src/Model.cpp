@@ -14,7 +14,7 @@ int NumComponents(int type);
 int CompSize(int comp);
 std::vector<float> ReadAccessorAsFloat(const tinygltf::Model& m, const tinygltf::Accessor& acc);
 std::vector<uint32_t> ReadAccessorAsUInt32(const tinygltf::Model& m, const tinygltf::Accessor& acc);
-
+Image ImageFromGlTFImage(const tinygltf::Image& image, const tinygltf::Sampler& sampler, bool srgb);
 
 Model::Model(std::filesystem::path p)
 {
@@ -184,6 +184,15 @@ Model::Model(std::filesystem::path p)
                     const auto& v              = gm.values.at("baseColorFactor").ColorFactor();
                     outPrim.material.baseColor = glm::vec4{v[0], v[1], v[2], v[3]};
                 }
+                if(gm.values.find("baseColorTexture") != gm.values.end())
+                {
+                    const auto& tex     = gm.pbrMetallicRoughness.baseColorTexture;
+                    const auto& texture = gltf.textures[tex.index];
+                    const auto& img     = gltf.images[texture.source];
+                    const auto& sampler = gltf.samplers[texture.sampler];
+
+                    outPrim.material.baseColorTexture = ImageFromGlTFImage(img, sampler, true);
+                }
                 if(gm.values.find("metallicFactor") != gm.values.end())
                 {
                     const auto& s                 = gm.values.at("metallicFactor").Factor();
@@ -196,7 +205,26 @@ Model::Model(std::filesystem::path p)
                     outPrim.material.roughness = s;
                 }
 
+                if(gm.values.find("metallicRoughnessTexture") != gm.values.end())
+                {
+                    const auto& tex     = gm.pbrMetallicRoughness.metallicRoughnessTexture;
+                    const auto& texture = gltf.textures[tex.index];
+                    const auto& img     = gltf.images[texture.source];
+                    const auto& sampler = gltf.samplers[texture.sampler];
+
+                    outPrim.material.metallicRoughnessTexture = ImageFromGlTFImage(img, sampler, false);
+                }
+
                 outPrim.material.emissiveColor = glm::vec3{gm.emissiveFactor[0], gm.emissiveFactor[1], gm.emissiveFactor[2]};
+                if(gm.values.find("emissiveTexture") != gm.values.end())
+                {
+                    const auto& tex     = gm.emissiveTexture;
+                    const auto& texture = gltf.textures[tex.index];
+                    const auto& img     = gltf.images[texture.source];
+                    const auto& sampler = gltf.samplers[texture.sampler];
+
+                    outPrim.material.emissiveColorTexture = ImageFromGlTFImage(img, sampler, true);
+                }
 
                 if(gm.extensions.find("KHR_materials_emissive_strength") != gm.extensions.end())
                 {
@@ -239,6 +267,17 @@ Model::Model(std::filesystem::path p)
                         outPrim.material.specularTint.r = ext.Get(0).GetNumberAsDouble();
                         outPrim.material.specularTint.g = ext.Get(1).GetNumberAsDouble();
                         outPrim.material.specularTint.b = ext.Get(2).GetNumberAsDouble();
+                    }
+                    if(gm.values.find("specularColorTexture") != gm.values.end())
+                    {
+                        auto ext             = extVal.Get("specularColorTexture");
+                        const auto& texIndex = ext.Get("index").GetNumberAsInt();
+                        assert(texIndex >= 0);
+                        const auto& texture = gltf.textures[texIndex];
+                        const auto& img     = gltf.images[texture.source];
+                        const auto& sampler = gltf.samplers[texture.sampler];
+
+                        outPrim.material.specularTintTexture = ImageFromGlTFImage(img, sampler, true);
                     }
                 }
             }
@@ -310,9 +349,9 @@ Model::Model(std::filesystem::path p)
                 outPrim.indexBufferOffset = 0;
                 outPrim.indexBufferSize   = 0;
             }
-            outMesh.primitives.push_back(outPrim);
+            outMesh.primitives.push_back(std::move(outPrim));
         }
-        m_meshes.push_back(outMesh);
+        m_meshes.push_back(std::move(outMesh));
     }
 
     stagingVertexBuffer.Copy(&m_vertexBuffer);
@@ -470,4 +509,96 @@ std::vector<uint32_t> ReadAccessorAsUInt32(const tinygltf::Model& m, const tinyg
         out.push_back(v);
     }
     return out;
+}
+
+Image ImageFromGlTFImage(const tinygltf::Image& image, const tinygltf::Sampler& sampler, bool srgb)
+{
+    VkFormat format = VK_FORMAT_UNDEFINED;
+    if(image.component == 4)
+    {
+        if(srgb)
+            format = VK_FORMAT_R8G8B8A8_SRGB;
+        else
+            format = VK_FORMAT_R8G8B8A8_UNORM;
+    }
+    else if(image.component == 3)
+    {
+        if(srgb)
+            format = VK_FORMAT_R8G8B8_SRGB;
+        else
+            format = VK_FORMAT_R8G8B8_UNORM;
+    }
+
+    ImageCreateInfo ci{};
+    ci.format      = format;
+    ci.usage       = VK_IMAGE_USAGE_SAMPLED_BIT;
+    ci.aspectFlags = VK_IMAGE_ASPECT_COLOR_BIT;
+    ci.layout      = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    ci.debugName   = image.name;
+
+    SamplerConfig samplerConfig{};
+    switch(sampler.minFilter)
+    {
+    case TINYGLTF_TEXTURE_FILTER_LINEAR:
+        samplerConfig.minFilter = VK_FILTER_LINEAR;
+        break;
+    case TINYGLTF_TEXTURE_FILTER_NEAREST:
+        samplerConfig.minFilter = VK_FILTER_NEAREST;
+        break;
+    case TINYGLTF_TEXTURE_FILTER_LINEAR_MIPMAP_LINEAR:
+        samplerConfig.minFilter = VK_FILTER_LINEAR;
+        samplerConfig.mipFilter = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        break;
+    case TINYGLTF_TEXTURE_FILTER_LINEAR_MIPMAP_NEAREST:
+        samplerConfig.minFilter = VK_FILTER_LINEAR;
+        samplerConfig.mipFilter = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        break;
+    case TINYGLTF_TEXTURE_FILTER_NEAREST_MIPMAP_LINEAR:
+        samplerConfig.minFilter = VK_FILTER_NEAREST;
+        samplerConfig.mipFilter = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        break;
+    case TINYGLTF_TEXTURE_FILTER_NEAREST_MIPMAP_NEAREST:
+        samplerConfig.minFilter = VK_FILTER_NEAREST;
+        samplerConfig.mipFilter = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        break;
+    default:
+        assert(!"Invalid gltf sampler filter");
+    }
+    switch(sampler.magFilter)
+    {
+    case TINYGLTF_TEXTURE_FILTER_LINEAR:
+        samplerConfig.magFilter = VK_FILTER_LINEAR;
+        break;
+    case TINYGLTF_TEXTURE_FILTER_NEAREST:
+        samplerConfig.magFilter = VK_FILTER_NEAREST;
+        break;
+    default:
+        assert(!"Invalid gltf sampler filter");
+    }
+
+    assert(sampler.wrapS == sampler.wrapT && "No separate wrapS and wrapT mode yet.");
+    switch(sampler.wrapS)
+    {
+    case TINYGLTF_TEXTURE_WRAP_CLAMP_TO_EDGE:
+        samplerConfig.addressMode = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        break;
+    case TINYGLTF_TEXTURE_WRAP_MIRRORED_REPEAT:
+        samplerConfig.addressMode = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+        break;
+    case TINYGLTF_TEXTURE_WRAP_REPEAT:
+        samplerConfig.addressMode = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        break;
+    default:
+        assert(!"Invalid gltf sampler wrap mode");
+    }
+
+
+    Image res(image.width, image.height, ci);
+    res.SetSamplerConfig(samplerConfig);
+    Buffer staging(res.GetMemorySize(), VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true);
+    staging.Fill(image.image);
+    staging.CopyToImage(res, image.width, image.height);
+
+    res.TransitionLayout(VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL);
+    return res;
 }

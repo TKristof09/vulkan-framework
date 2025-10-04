@@ -21,6 +21,8 @@ public:
 
     static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
+    VkSampler GetSampler(SamplerConfig config);
+
 private:
     void CreateInstance();
     void CreateDevice();
@@ -50,4 +52,6 @@ private:
     std::vector<CommandBuffer> m_mainCommandBuffers;
 
     std::vector<std::function<void(CommandBuffer&, Image&, uint32_t, float)>> m_renderCommands;
+
+    std::unordered_map<SamplerConfig, Sampler> m_samplers;
 };

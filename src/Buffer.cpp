@@ -4,9 +4,9 @@
 
 Buffer::Buffer() : m_size(0) {}
 
-Buffer::Buffer(VkDeviceSize size, VkBufferUsageFlags usage, bool mappable)
+Buffer::Buffer(VkDeviceSize size, VkBufferUsageFlags usage, bool mappable, uint32_t alignment)
 {
-    Allocate(size, usage, mappable);
+    Allocate(size, usage, mappable, alignment);
 }
 
 Buffer::~Buffer()
@@ -34,7 +34,7 @@ uint32_t FindMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, Vk
     }
     throw std::runtime_error("Failed to find suitable memory type");
 }
-void Buffer::Allocate(VkDeviceSize size, VkBufferUsageFlags usage, bool mappable)
+void Buffer::Allocate(VkDeviceSize size, VkBufferUsageFlags usage, bool mappable, uint32_t alignment)
 {
     m_size = size;
 
@@ -59,7 +59,14 @@ void Buffer::Allocate(VkDeviceSize size, VkBufferUsageFlags usage, bool mappable
     if(mappable)
         allocCreateInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;  // TODO: how to chose between sequential and random access
     VmaAllocationInfo allocInfo;
-    VK_CHECK(vmaCreateBuffer(VulkanContext::GetVmaAllocator(), &createInfo, &allocCreateInfo, &m_buffer, &m_allocation, &allocInfo), "Failed to create buffer");
+    if(alignment > 0)
+    {
+        VK_CHECK(vmaCreateBufferWithAlignment(VulkanContext::GetVmaAllocator(), &createInfo, &allocCreateInfo, alignment, &m_buffer, &m_allocation, &allocInfo), "Failed to create buffer");
+    }
+    else
+    {
+        VK_CHECK(vmaCreateBuffer(VulkanContext::GetVmaAllocator(), &createInfo, &allocCreateInfo, &m_buffer, &m_allocation, &allocInfo), "Failed to create buffer");
+    }
     m_mappedMemory = allocInfo.pMappedData;
     VkMemoryPropertyFlags memPropFlags;
     vmaGetAllocationMemoryProperties(VulkanContext::GetVmaAllocator(), m_allocation, &memPropFlags);

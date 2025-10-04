@@ -67,34 +67,16 @@ Renderer::Renderer(const std::shared_ptr<Window>& window) : m_window(window)
     CreateSyncObjects();
 
     SetupImgui();
-    VkSamplerCreateInfo samplerCI{};
-    samplerCI.sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerCI.pNext                   = nullptr;
-    samplerCI.flags                   = 0;
-    samplerCI.magFilter               = VK_FILTER_LINEAR;
-    samplerCI.minFilter               = VK_FILTER_LINEAR;
-    samplerCI.mipmapMode              = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerCI.addressModeU            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerCI.addressModeV            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerCI.addressModeW            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerCI.mipLodBias              = 0.0f;
-    samplerCI.anisotropyEnable        = VK_TRUE;
-    samplerCI.maxAnisotropy           = 16.f;
-    samplerCI.compareEnable           = VK_FALSE;
-    samplerCI.compareOp               = VK_COMPARE_OP_ALWAYS;
-    samplerCI.minLod                  = 0.0f;
-    samplerCI.maxLod                  = VK_LOD_CLAMP_NONE;
-    samplerCI.borderColor             = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-    samplerCI.unnormalizedCoordinates = VK_FALSE;
 
-    VK_CHECK(vkCreateSampler(VulkanContext::GetDevice(), &samplerCI, nullptr, &VulkanContext::m_textureSampler), "Failed to create sampler");
+
+    VulkanContext::m_textureSampler = m_samplers.emplace(SamplerConfig{}, SamplerConfig{}).first->second.GetVkSampler();
 }
 
 Renderer::~Renderer()
 {
     vkDeviceWaitIdle(VulkanContext::GetDevice());
 
-    vkDestroySampler(VulkanContext::GetDevice(), VulkanContext::GetTextureSampler(), nullptr);
+    m_samplers.clear();
 
     for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
     {
@@ -272,45 +254,46 @@ void Renderer::CreateDevice()
     queueCreateInfos.push_back(queueCreateInfo);
 
     VkPhysicalDeviceFeatures deviceFeatures             = {};
-    deviceFeatures.samplerAnisotropy                    = VK_TRUE;
-    deviceFeatures.sampleRateShading                    = VK_TRUE;
-    deviceFeatures.shaderStorageImageReadWithoutFormat  = VK_TRUE;
-    deviceFeatures.shaderStorageImageWriteWithoutFormat = VK_TRUE;
-    deviceFeatures.pipelineStatisticsQuery              = VK_TRUE;
-    deviceFeatures.shaderInt64                          = VK_TRUE;
-    deviceFeatures.shaderFloat64                        = VK_TRUE;
-
-    // deviceFeatures.depthBounds = VK_TRUE; //doesnt work on my surface 2017
+    deviceFeatures.samplerAnisotropy                    = true;
+    deviceFeatures.sampleRateShading                    = true;
+    deviceFeatures.shaderStorageImageReadWithoutFormat  = true;
+    deviceFeatures.shaderStorageImageWriteWithoutFormat = true;
+    deviceFeatures.pipelineStatisticsQuery              = true;
+    deviceFeatures.shaderInt64                          = true;
+    deviceFeatures.shaderFloat64                        = true;
 
     VkPhysicalDeviceVulkan11Features device11Features = {};
     device11Features.sType                            = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
-    device11Features.shaderDrawParameters             = VK_TRUE;
-    device11Features.multiview                        = VK_TRUE;
+    device11Features.shaderDrawParameters             = true;
+    device11Features.multiview                        = true;
 
-    VkPhysicalDeviceVulkan12Features device12Features             = {};
-    device12Features.sType                                        = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    VkPhysicalDeviceVulkan12Features device12Features              = {};
+    device12Features.sType                                         = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
     // these are for dynamic descriptor indexing
-    deviceFeatures.shaderSampledImageArrayDynamicIndexing         = VK_TRUE;
-    deviceFeatures.shaderStorageBufferArrayDynamicIndexing        = VK_TRUE;
-    device12Features.shaderSampledImageArrayNonUniformIndexing    = VK_TRUE;
-    device12Features.runtimeDescriptorArray                       = VK_TRUE;
-    device12Features.descriptorBindingPartiallyBound              = VK_TRUE;
-    device12Features.descriptorBindingUpdateUnusedWhilePending    = VK_TRUE;
-    device12Features.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
-    device12Features.descriptorBindingStorageImageUpdateAfterBind = VK_TRUE;
-    device12Features.bufferDeviceAddress                          = VK_TRUE;
-    device12Features.drawIndirectCount                            = VK_TRUE;
-    device12Features.scalarBlockLayout                            = VK_TRUE;
+    deviceFeatures.shaderSampledImageArrayDynamicIndexing          = true;
+    deviceFeatures.shaderStorageBufferArrayDynamicIndexing         = true;
+    device12Features.shaderSampledImageArrayNonUniformIndexing     = true;
+    device12Features.runtimeDescriptorArray                        = true;
+    device12Features.descriptorBindingPartiallyBound               = true;
+    device12Features.descriptorBindingUpdateUnusedWhilePending     = true;
+    device12Features.descriptorBindingSampledImageUpdateAfterBind  = true;
+    device12Features.descriptorBindingStorageImageUpdateAfterBind  = true;
+    device12Features.descriptorBindingUniformBufferUpdateAfterBind = true;
+    device12Features.descriptorBindingStorageBufferUpdateAfterBind = true;
+    device12Features.bufferDeviceAddress                           = true;
+    device12Features.drawIndirectCount                             = true;
+    device12Features.scalarBlockLayout                             = true;
 
     VkPhysicalDeviceVulkan13Features device13Features = {};
     device13Features.sType                            = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
-    device13Features.dynamicRendering                 = VK_TRUE;
-    device13Features.maintenance4                     = VK_TRUE;  // need it because the spirv compiler uses localsizeid even though it doesnt need to for now, but i might switch to spec constants in the future anyway
-    device13Features.synchronization2                 = VK_TRUE;
+    device13Features.dynamicRendering                 = true;
+    device13Features.maintenance4                     = true;  // need it because the spirv compiler uses localsizeid even though it doesnt need to for now, but i might switch to spec constants in the future anyway
+    device13Features.synchronization2                 = true;
 
     VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures{};
-    accelerationStructureFeatures.sType                 = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
-    accelerationStructureFeatures.accelerationStructure = VK_TRUE;
+    accelerationStructureFeatures.sType                                                 = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+    accelerationStructureFeatures.accelerationStructure                                 = true;
+    accelerationStructureFeatures.descriptorBindingAccelerationStructureUpdateAfterBind = true;
 
     VkPhysicalDeviceRayTracingPipelineFeaturesKHR rayTracingFeatures{};
     rayTracingFeatures.sType              = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
@@ -321,9 +304,12 @@ void Renderer::CreateDevice()
     rayQueryFeatures.rayQuery = true;
 
 #ifdef VDEBUG
-    VkPhysicalDeviceRayTracingValidationFeaturesNV validationFeatures = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_VALIDATION_FEATURES_NV};
-    VkPhysicalDeviceFeatures2 features                                = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
-    features.pNext                                                    = &validationFeatures;
+    VkPhysicalDeviceRayTracingValidationFeaturesNV validationFeatures = {};
+    validationFeatures.sType                                          = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_VALIDATION_FEATURES_NV;
+
+    VkPhysicalDeviceFeatures2 features = {};
+    features.sType                     = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features.pNext                     = &validationFeatures;
     vkGetPhysicalDeviceFeatures2(VulkanContext::GetPhysicalDevice(), &features);
 
     bool rayTracingValidationAvailable = validationFeatures.rayTracingValidation;
@@ -528,7 +514,7 @@ void Renderer::CreateDescriptorPool()
     createInfo.poolSizeCount              = static_cast<uint32_t>(poolSizes.size());
     createInfo.pPoolSizes                 = poolSizes.data();
     createInfo.maxSets                    = 100;
-    createInfo.flags                      = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    createInfo.flags                      = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT | VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
     VK_CHECK(vkCreateDescriptorPool(VulkanContext::GetDevice(), &createInfo, nullptr, &VulkanContext::m_descriptorPool), "Failed to create descriptor pool");
 }
 
@@ -568,6 +554,11 @@ void Renderer::SetupImgui()
     imguiInitInfo.CheckVkResultFn = [](VkResult result) { VK_CHECK(result, "Error in imgui"); };
     // clang-format on
     ImGui_ImplVulkan_Init(&imguiInitInfo);
+}
+
+VkSampler Renderer::GetSampler(SamplerConfig config)
+{
+    return m_samplers.try_emplace(config, config).first->second.GetVkSampler();
 }
 
 void Renderer::Render(float dt)

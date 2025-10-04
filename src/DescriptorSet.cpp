@@ -20,9 +20,20 @@ VkDescriptorSetLayout DescriptorSetLayoutBuilder::Build(VkShaderStageFlags stage
     }
     VkDescriptorSetLayoutCreateInfo ci{};
     ci.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    ci.flags        = flags;
+    ci.flags        = flags | VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
     ci.bindingCount = static_cast<uint32_t>(bindings.size());
     ci.pBindings    = bindings.data();
+
+    VkDescriptorSetLayoutBindingFlagsCreateInfo bindingFlagsCi = {};
+    std::vector<VkDescriptorBindingFlags> bindingFlags(bindings.size(), VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT);
+
+    bindingFlagsCi.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
+    bindingFlagsCi.pBindingFlags = bindingFlags.data();
+    bindingFlagsCi.bindingCount  = static_cast<uint32_t>(bindingFlags.size());
+
+    ci.pNext = &bindingFlagsCi;
+
+
     VkDescriptorSetLayout layout;
     VK_CHECK(vkCreateDescriptorSetLayout(VulkanContext::GetDevice(), &ci, nullptr, &layout), "Failed to create descriptor set layout");
     return layout;

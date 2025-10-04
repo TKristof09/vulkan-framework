@@ -1,4 +1,5 @@
 #pragma once
+#include "Sampler.hpp"
 #include "VulkanContext.hpp"
 #include <filesystem>
 #include <volk.h>
@@ -49,7 +50,8 @@ public:
           m_aspect(other.m_aspect),
           m_usage(other.m_usage),
           m_onlyHandleImageView(other.m_onlyHandleImageView),
-          m_allocation(other.m_allocation)
+          m_allocation(other.m_allocation),
+          m_sampler(other.m_sampler)
     {
         other.m_image = VK_NULL_HANDLE;
     }
@@ -74,6 +76,7 @@ public:
         m_usage               = other.m_usage;
         m_onlyHandleImageView = other.m_onlyHandleImageView;
         m_allocation          = other.m_allocation;
+        m_sampler             = other.m_sampler;
 
         other.m_image = VK_NULL_HANDLE;
         return *this;
@@ -83,6 +86,7 @@ public:
     void Free();
     void TransitionLayout(VkImageLayout newLayout);
     void GenerateMipmaps(VkImageLayout newLayout);
+
 
     VkImageView CreateImageView(uint32_t mip);
 
@@ -101,6 +105,8 @@ public:
 
     VkImageMemoryBarrier2 GetBarrier(VkImageLayout oldLayout, VkImageLayout newLayout, VkPipelineStageFlags2 srcStage, VkAccessFlagBits2 srcAccess, VkPipelineStageFlags2 dstStage, VkAccessFlagBits2 dstAccess);
 
+    void SetSamplerConfig(SamplerConfig config) { m_sampler = config; }
+    std::optional<SamplerConfig> GetSamplerConfig() const { return m_sampler; }
 
 protected:
     uint32_t m_mipLevels;
@@ -120,4 +126,6 @@ protected:
     bool m_onlyHandleImageView = false;
 
     VmaAllocation m_allocation;
+
+    std::optional<SamplerConfig> m_sampler;
 };

@@ -48,6 +48,11 @@ public:
         float transmission = 0.0f;
 
         glm::vec3 specularTint = glm::vec3(1.0);
+
+        std::optional<Image> baseColorTexture;
+        std::optional<Image> specularTintTexture;
+        std::optional<Image> metallicRoughnessTexture;  // B - metallicness, G - roughness
+        std::optional<Image> emissiveColorTexture;
     };
     struct Primitive
     {

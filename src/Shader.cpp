@@ -1,6 +1,7 @@
 #include "Shader.hpp"
 #include "Renderer.hpp"
 #include "VulkanContext.hpp"
+#include "Application.hpp"
 
 #include <cmath>
 #include <set>
@@ -12,6 +13,7 @@
 #include <ranges>
 
 
+#include <fstream>
 struct PairHash
 {
     std::size_t operator()(const std::pair<uint32_t, uint32_t>& p) const noexcept
@@ -71,7 +73,7 @@ void Shader::Finalize(Pipeline* pipeline)
     }
     m_pushConstantData.resize(m_pushConstantRange.size + m_pushConstantRange.offset);
 }
-void Shader::BindResources(CommandBuffer& cb, uint32_t frameIndex, VkPipelineLayout layout, VkPipelineBindPoint bindPoint) const
+void Shader::BindResources(CommandBuffer& cb, uint32_t /* frameIndex */, VkPipelineLayout layout, VkPipelineBindPoint /* bindPoint */) const
 {
     if(m_pushConstantRange.size > 0)
         vkCmdPushConstants(cb.GetCommandBuffer(), layout, m_stage, m_pushConstantRange.offset, m_pushConstantRange.size, &m_pushConstantData[m_pushConstantRange.offset]);
@@ -214,6 +216,12 @@ bool Shader::Compile(const std::filesystem::path& path, std::string_view entryPo
     VK_CHECK(vkCreateShaderModule(VulkanContext::GetDevice(), &createInfo, nullptr, &m_shaderModule), "Failed to create shader module");
     Reflect(composedProgram->getLayout());
 
+    if(m_stage == VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR)
+    {
+        std::ofstream ofs("shaders/test.spv", std::ios::binary);
+        ofs.write(static_cast<const char*>(spirvCode->getBufferPointer()), static_cast<std::streamsize>(spirvCode->getBufferSize()));
+        ofs.flush();
+    }
     return true;
 }
 
@@ -465,7 +473,13 @@ void Shader::Reflect(slang::ProgramLayout* layout)
                 continue;
             if(added[set].contains(binding.binding))
                 continue;
-            m_descriptorLayoutBuilders[set].AddBinding(binding.binding, binding.type);
+
+            uint32_t count = 1;
+            if(binding.arrayElementCount > 0)
+                count = binding.arrayElementCount;
+            if(binding.isVariableSize)
+                count = 1000;
+            m_descriptorLayoutBuilders[set].AddBinding(binding.binding, binding.type, count);
             added[set].insert(binding.binding);
         }
     }
@@ -480,7 +494,7 @@ void Shader::Reflect(slang::ProgramLayout* layout)
     }
 }
 
-void Shader::SetParameter(uint32_t frameIndex, std::string_view name, const Image* image)
+void Shader::SetParameter(uint32_t frameIndex, std::string_view name, const Image* image, uint32_t index)
 {
     auto it = m_bindings.find(name);
     if(it == m_bindings.end())
@@ -497,17 +511,32 @@ void Shader::SetParameter(uint32_t frameIndex, std::string_view name, const Imag
     }
     else
     {
+        if(binding.type != VK_DESCRIPTOR_TYPE_STORAGE_IMAGE && binding.type != VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER && binding.type != VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE)
+        {
+            Log::Error("Trying to update binding {}, but it is not a texture binding", name);
+            return;
+        }
+        if(binding.arrayElementCount > 0 && index >= binding.arrayElementCount && !binding.isVariableSize)
+        {
+            Log::Error("Trying to update binding {} element {}, index is out of range (#elements: {})", name, index, binding.arrayElementCount);
+            return;
+        }
+
         VkWriteDescriptorSet descriptorWrite{};
         descriptorWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrite.descriptorCount = 1;
         descriptorWrite.dstBinding      = binding.binding;
         descriptorWrite.dstSet          = m_pipeline->m_descriptorSets[frameIndex][binding.set];
         descriptorWrite.descriptorType  = binding.type;
+        descriptorWrite.dstArrayElement = index;
 
         VkDescriptorImageInfo imageInfo{};
         imageInfo.imageLayout = image->GetLayout();
         imageInfo.imageView   = image->GetImageView();
-        imageInfo.sampler     = VulkanContext::GetTextureSampler();
+        if(auto sampler = image->GetSamplerConfig())
+        {
+            imageInfo.sampler = Application::GetInstance()->GetRenderer()->GetSampler(sampler.value());
+        }
 
         descriptorWrite.pImageInfo = &imageInfo;
 
@@ -515,7 +544,7 @@ void Shader::SetParameter(uint32_t frameIndex, std::string_view name, const Imag
     }
 }
 
-void Shader::SetParameter(uint32_t frameIndex, std::string_view name, const Buffer* buffer)
+void Shader::SetParameter(uint32_t frameIndex, std::string_view name, const Buffer* buffer, uint32_t index)
 {
     auto it = m_bindings.find(name);
     if(it == m_bindings.end())
@@ -534,13 +563,18 @@ void Shader::SetParameter(uint32_t frameIndex, std::string_view name, const Buff
     {
         if(binding.type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
         {
-            Log::Warn("Trying to update binding {}, but it is not a storage buffer", name);
+            Log::Error("Trying to update binding {}, but it is not a storage buffer", name);
             return;
         }
 
         if(buffer->GetSize() % binding.stride != 0)
         {
             Log::Warn("Trying to update binding {} with a buffer whose size ({}) isn't divisible by the stride ({}). This may indicate a bug in your code", name, buffer->GetSize(), binding.stride);
+        }
+        if(binding.arrayElementCount > 0 && index >= binding.arrayElementCount && !binding.isVariableSize)
+        {
+            Log::Error("Trying to update binding {} element {}, index is out of range (#elements: {})", name, index, binding.arrayElementCount);
+            return;
         }
 
         VkWriteDescriptorSet descriptorWrite{};
@@ -549,6 +583,7 @@ void Shader::SetParameter(uint32_t frameIndex, std::string_view name, const Buff
         descriptorWrite.dstBinding      = binding.binding;
         descriptorWrite.dstSet          = m_pipeline->m_descriptorSets[frameIndex][binding.set];
         descriptorWrite.descriptorType  = binding.type;
+        descriptorWrite.dstArrayElement = index;
 
         VkDescriptorBufferInfo bufferInfo{};
         bufferInfo.buffer = buffer->GetVkBuffer();
@@ -561,7 +596,7 @@ void Shader::SetParameter(uint32_t frameIndex, std::string_view name, const Buff
     }
 }
 
-void Shader::SetParameter(uint32_t frameIndex, std::string_view name, const Raytracing::TLAS& tlas)
+void Shader::SetParameter(uint32_t frameIndex, std::string_view name, const Raytracing::TLAS& tlas, uint32_t index)
 {
     auto it = m_bindings.find(name);
     if(it == m_bindings.end())
@@ -580,7 +615,12 @@ void Shader::SetParameter(uint32_t frameIndex, std::string_view name, const Rayt
     {
         if(binding.type != VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR)
         {
-            Log::Warn("Trying to update binding {}, but it is not an acceleration structure", name);
+            Log::Error("Trying to update binding {}, but it is not an acceleration structure", name);
+            return;
+        }
+        if(binding.arrayElementCount > 0 && index >= binding.arrayElementCount && !binding.isVariableSize)
+        {
+            Log::Error("Trying to update binding {} element {}, index is out of range (#elements: {})", name, index, binding.arrayElementCount);
             return;
         }
 
@@ -595,6 +635,7 @@ void Shader::SetParameter(uint32_t frameIndex, std::string_view name, const Rayt
         descriptorWrite.dstBinding      = binding.binding;
         descriptorWrite.dstSet          = m_pipeline->m_descriptorSets[frameIndex][binding.set];
         descriptorWrite.descriptorType  = binding.type;
+        descriptorWrite.dstArrayElement = index;
         descriptorWrite.pNext           = &descriptorAccelerationStructureInfo;
 
         vkUpdateDescriptorSets(VulkanContext::GetDevice(), 1, &descriptorWrite, 0, nullptr);

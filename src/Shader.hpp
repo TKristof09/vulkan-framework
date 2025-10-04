@@ -86,9 +86,9 @@ public:
 
     void BindResources(CommandBuffer& cb, uint32_t frameIndex, VkPipelineLayout layout, VkPipelineBindPoint bindPoint) const;
 
-    void SetParameter(uint32_t frameIndex, std::string_view name, const Image* image);
-    void SetParameter(uint32_t frameIndex, std::string_view name, const Buffer* buffer);
-    void SetParameter(uint32_t frameIndex, std::string_view name, const Raytracing::TLAS& tlas);
+    void SetParameter(uint32_t frameIndex, std::string_view name, const Image* image, uint32_t index = 0);
+    void SetParameter(uint32_t frameIndex, std::string_view name, const Buffer* buffer, uint32_t index = 0);
+    void SetParameter(uint32_t frameIndex, std::string_view name, const Raytracing::TLAS& tlas, uint32_t index = 0);
 
     template<typename T>
         requires(IsSimpleParameter<T>)

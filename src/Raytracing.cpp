@@ -29,7 +29,14 @@ BLAS CreateBLAS(const Model& model)
     std::vector<size_t> scratchSizes;
     std::vector<size_t> primitiveCounts;
 
-    const size_t kAlignment = 256;
+    VkPhysicalDeviceAccelerationStructurePropertiesKHR accelerationProperties{};
+    accelerationProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR;
+    VkPhysicalDeviceProperties2 deviceProperties2{};
+    deviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    deviceProperties2.pNext = &accelerationProperties;
+    vkGetPhysicalDeviceProperties2(VulkanContext::GetPhysicalDevice(), &deviceProperties2);
+    const uint32_t scratchAlignment          = accelerationProperties.minAccelerationStructureScratchOffsetAlignment;
+    const size_t accelerationOffsetAlignment = 256;
 
     for(const auto& mesh : model.GetMeshes())
     {
@@ -99,7 +106,7 @@ BLAS CreateBLAS(const Model& model)
         buildInfos.push_back(accelerationStructureBuildGeometryInfo);
 
 
-        totalAccelerationSize  = (totalAccelerationSize + sizeInfo.accelerationStructureSize + kAlignment - 1) & ~(kAlignment - 1);
+        totalAccelerationSize  = (totalAccelerationSize + sizeInfo.accelerationStructureSize + accelerationOffsetAlignment - 1) & ~(accelerationOffsetAlignment - 1);
         totalPrimitiveCount   += meshTriangleCount;
         maxScratchSize         = std::max(maxScratchSize, size_t(sizeInfo.buildScratchSize));
     }
@@ -125,7 +132,7 @@ BLAS CreateBLAS(const Model& model)
     }
 
     // Create a small scratch buffer used during build of the bottom level acceleration structure
-    Buffer scratchBuffer(maxScratchSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
+    Buffer scratchBuffer(maxScratchSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false, scratchAlignment);
 
     CommandBuffer cb;
     cb.Begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
@@ -255,8 +262,15 @@ TLAS CreateTLAS(const BLAS& blas, const Model& model)
     accelerationStructureCreateInfo.type   = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
     VK_CHECK(vkCreateAccelerationStructureKHR(VulkanContext::GetDevice(), &accelerationStructureCreateInfo, nullptr, &tlas.handle), "Failed to create TLAS");
 
+    VkPhysicalDeviceAccelerationStructurePropertiesKHR accelerationProperties{};
+    accelerationProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR;
+    VkPhysicalDeviceProperties2 deviceProperties2{};
+    deviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    deviceProperties2.pNext = &accelerationProperties;
+    vkGetPhysicalDeviceProperties2(VulkanContext::GetPhysicalDevice(), &deviceProperties2);
+    const uint32_t scratchAlignment = accelerationProperties.minAccelerationStructureScratchOffsetAlignment;
     // Create a small scratch buffer used during build of the top level acceleration structure
-    Buffer scratchBuffer(accelerationStructureBuildSizesInfo.buildScratchSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
+    Buffer scratchBuffer(accelerationStructureBuildSizesInfo.buildScratchSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false, scratchAlignment);
 
     // fill in the rest of the fields
     accelerationStructureBuildGeometryInfo.sType                     = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;

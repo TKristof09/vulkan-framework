@@ -18,7 +18,7 @@ public:
         TRANSFER
     };
     Buffer();
-    Buffer(VkDeviceSize size, VkBufferUsageFlags usage, bool mappable = false);
+    Buffer(VkDeviceSize size, VkBufferUsageFlags usage, bool mappable = false, uint32_t alignment = 0);
     template<typename T>
     Buffer(const std::vector<T>& data, VkBufferUsageFlags usage)
     {
@@ -59,7 +59,7 @@ public:
         return *this;
     }
 
-    void Allocate(VkDeviceSize size, VkBufferUsageFlags usage, bool mappable = false);
+    void Allocate(VkDeviceSize size, VkBufferUsageFlags usage, bool mappable = false, uint32_t alignment = 0);
     void Free();
     void Copy(Buffer* dst, VkDeviceSize size = 0);
     void CopyToImage(Image& image, uint32_t width, uint32_t height, uint32_t bytesPerPixel = 4, uint32_t layers = 1);

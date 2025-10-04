@@ -105,6 +105,11 @@ Image::Image(uint32_t width, uint32_t height, ImageCreateInfo createInfo) : m_wi
         VK_SET_DEBUG_NAME(m_imageViews[0], VK_OBJECT_TYPE_IMAGE_VIEW, createInfo.debugName.c_str());
     }
 #endif
+
+    if(createInfo.usage & VK_IMAGE_USAGE_SAMPLED_BIT)
+    {
+        m_sampler = SamplerConfig();
+    }
 }
 
 Image::Image(VkExtent2D extent, ImageCreateInfo createInfo) : Image(extent.width, extent.height, createInfo)

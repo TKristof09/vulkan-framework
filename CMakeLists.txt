@@ -59,14 +59,16 @@ FetchContent_Declare(stb
 )
 
 set(SLANG_VERSION "vulkan-sdk-${Vulkan_VERSION}.0")
-
 # Determine the platform and set the appropriate archive URL
+# Currently runtime arrays don't work with the latest vulkan-sdk-... release tag so need a later release
 if(WIN32)
     # Windows URL (x64)
-    set(SLANG_ARCHIVE_URL "https://github.com/shader-slang/slang/releases/download/${SLANG_VERSION}/slang-${SLANG_VERSION}-windows-x86_64.tar.gz")
+    # set(SLANG_ARCHIVE_URL "https://github.com/shader-slang/slang/releases/download/${SLANG_VERSION}/slang-${SLANG_VERSION}-windows-x86_64.tar.gz")
+    set(SLANG_ARCHIVE_URL "https://github.com/shader-slang/slang/releases/download/v2025.18.1/slang-2025.18.1-windows-x86_64.tar.gz")
 elseif(LINUX)
     # Linux URL (x64)
-    set(SLANG_ARCHIVE_URL "https://github.com/shader-slang/slang/releases/download/${SLANG_VERSION}/slang-${SLANG_VERSION}-linux-x86_64.tar.gz")
+    # set(SLANG_ARCHIVE_URL "https://github.com/shader-slang/slang/releases/download/${SLANG_VERSION}/slang-${SLANG_VERSION}-linux-x86_64.tar.gz")
+    set(SLANG_ARCHIVE_URL "https://github.com/shader-slang/slang/releases/download/v2025.18.1/slang-2025.18.1-linux-x86_64.tar.gz")
 endif()
 
 # FetchContent block to download the archive
@@ -89,7 +91,7 @@ FetchContent_Declare(tiny_gltf
 
 FetchContent_MakeAvailable(glm Vulkan-Utility-Libraries VulkanMemoryAllocator glfw slang imgui stb tiny_gltf)
 
-set(slang_DIR "${slang_SOURCE_DIR}/cmake")
+set(slang_ROOT "${slang_SOURCE_DIR}")
 find_package(slang CONFIG REQUIRED)
 
 # --- Create a custom target for Dear ImGui ---
@@ -162,6 +164,7 @@ set(GCC_CLANG_WARNINGS
     -Wall
     -Wextra
     -Wpedantic
+    -Werror
 )
 
 set(MSVC_WARNINGS
